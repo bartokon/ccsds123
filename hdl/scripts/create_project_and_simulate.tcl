@@ -103,6 +103,19 @@ if {$action eq "project-only"} {
     exit 0
 }
 
+set sim_options {}
+if {[info exists ::env(HDL_INPUT_FILE)]} {
+    set in_file [file normalize $::env(HDL_INPUT_FILE)]
+    lappend sim_options "-testplusarg {IN_FILENAME=$in_file}"
+}
+if {[info exists ::env(HDL_OUTPUT_DIR)]} {
+    set out_dir [file normalize $::env(HDL_OUTPUT_DIR)]
+    lappend sim_options "-testplusarg {OUT_DIR=$out_dir}"
+}
+if {[llength $sim_options] > 0} {
+    set_property -name {xsim.simulate.xsim.more_options} -value [join $sim_options " "] -objects [get_filesets sim_1]
+}
+
 set_property top $sim_top $sim_set
 launch_simulation -simset $sim_set -mode behavioral
 run all
