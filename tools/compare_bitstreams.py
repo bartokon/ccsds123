@@ -8,21 +8,44 @@ import struct
 import sys
 from pathlib import Path
 
-HEADER_FORMAT = "<4s7H3I"
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+HEADER_V2_FORMAT = "<4s7H3I"
+HEADER_V3_FORMAT = "<4s8H5h4H2I"
+HEADER_FORMATS = {
+    2: (HEADER_V2_FORMAT, struct.calcsize(HEADER_V2_FORMAT), 8),
+    3: (HEADER_V3_FORMAT, struct.calcsize(HEADER_V3_FORMAT), 18),
+}
 MAGIC = b"C123"
 
 
 def parse_container(path: Path) -> tuple[tuple[int, ...], bytes]:
     data = path.read_bytes()
-    if len(data) < HEADER_SIZE:
+    min_header_size = min(size for _, size, _ in HEADER_FORMATS.values())
+    if len(data) < min_header_size:
         raise ValueError(f"Container '{path}' is too small ({len(data)} bytes)")
-    header = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
+
+    if data[:4] != MAGIC:
+        raise ValueError(f"Container '{path}' has invalid magic {data[:4]!r}")
+
+    (version,) = struct.unpack_from("<H", data, 4)
+
+    if version not in HEADER_FORMATS:
+        raise ValueError(f"Container '{path}' has unsupported version {version}")
+
+    fmt, header_size, payload_index = HEADER_FORMATS[version]
+    if len(data) < header_size:
+        raise ValueError(
+            f"Container '{path}' is too small for version {version} header "
+            f"({len(data)} < {header_size})"
+        )
+
+    header = struct.unpack(fmt, data[:header_size])
     if header[0] != MAGIC:
         raise ValueError(f"Container '{path}' has invalid magic {header[0]!r}")
-    payload_bits = header[8]
+
+    payload_bits = header[payload_index]
     payload_bytes = (payload_bits + 7) // 8
-    payload = data[HEADER_SIZE:HEADER_SIZE + payload_bytes]
+    payload_offset = header_size
+    payload = data[payload_offset:payload_offset + payload_bytes]
     if len(payload) != payload_bytes:
         raise ValueError(
             f"Container '{path}' payload truncated: expected {payload_bytes} bytes, got {len(payload)}"
