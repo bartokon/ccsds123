@@ -11,7 +11,7 @@ add_library(ccsds123 STATIC
 
 target_include_directories(ccsds123
     PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/cpp/include>
         $<INSTALL_INTERFACE:include>)
 
 target_compile_features(ccsds123 PUBLIC cxx_std_20)

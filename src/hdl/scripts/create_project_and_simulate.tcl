@@ -35,7 +35,7 @@ proc gather_files {dir pattern} {
 }
 
 set script_dir [file dirname [file normalize [info script]]]
-set repo_root  [file normalize [file join $script_dir .. ..]]
+set repo_root  [file normalize [file join $script_dir .. .. ..]]
 set tools_dir  [file join $repo_root tools]
 set hdl_root   [file normalize [file join $script_dir ..]]
 set src_dir    [file join $hdl_root src]

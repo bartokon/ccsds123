@@ -8,6 +8,18 @@ Golomb entropy coder.
 
 ## Design highlights
 
+### Repository layout
+
+The sources are grouped under `src/` to keep host, HDL, and AI Engine
+implementations co-located:
+
+- `src/cpp` — C++ library, command-line tools, headers, and unit tests.
+- `src/hdl` — VHDL sources, test benches, and Vivado automation scripts.
+- `src/aie` — AI Engine kernels and graph definitions.
+- `src/python_reference` — Reference Python implementations used to generate
+  shared verification vectors.
+- `tests/data` — Reusable fixtures shared across the host and hardware flows.
+
 - **One-to-one module ports:** the control, local-difference, dot-product,
   predictor, weight-update, and residual-mapper VHDL units are translated directly
   into `ccsds123::modules`. Each function mirrors the original fixed-point

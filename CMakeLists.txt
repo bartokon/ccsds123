@@ -4,4 +4,4 @@ project(ccsds123 LANGUAGES CXX)
 include(CTest)
 enable_testing()
 
-add_subdirectory(cpp)
+add_subdirectory(src/cpp)

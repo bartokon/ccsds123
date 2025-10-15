@@ -22,7 +22,7 @@ struct VectorCase {
 };
 
 std::filesystem::path vector_path() {
-  return std::filesystem::path(PROJECT_SOURCE_DIR) / "tests" / "vectors" / "local_diff_vectors.csv";
+  return std::filesystem::path(PROJECT_SOURCE_DIR) / "tests" / "data" / "local_diff_vectors.csv";
 }
 
 VectorCase parse_case(const std::string &line) {

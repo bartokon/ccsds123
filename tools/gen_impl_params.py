@@ -20,7 +20,7 @@ def main():
     signed = str(image.get("signed", "false")).lower() == "true"
 
     repo_root = Path(__file__).resolve().parents[1]
-    tb_dir = repo_root / "hdl" / "tb"
+    tb_dir = repo_root / "src" / "hdl" / "tb"
     tb_dir.mkdir(parents=True, exist_ok=True)
 
     # Write verilog parameter file to be included in test bench
