@@ -1,5 +1,6 @@
 #include "Ccsds123Codec.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <cstdint>
@@ -166,7 +167,10 @@ ImageU16 load_image(const CliOptions &opts, int &nx, int &ny, int &nz, int &d) {
   return load_bsq(opts, nx, ny, nz, d);
 }
 
-void write_file(const std::string &path, const ccsds123::Bitstream &bitstream) {
+void write_file(const std::filesystem::path &path, const ccsds123::Bitstream &bitstream) {
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path());
+  }
   const auto data = bitstream.bytes();
   std::ofstream out(path, std::ios::binary);
   require(out.good(), "Unable to open output file");
@@ -178,23 +182,63 @@ void write_file(const std::string &path, const ccsds123::Bitstream &bitstream) {
 int main(int argc, char **argv) {
   try {
     auto opts = parse_cli(argc, argv);
-    int nx = 0;
-    int ny = 0;
-    int nz = 0;
-    int d = 0;
-    const auto image = load_image(opts, nx, ny, nz, d);
+    const std::filesystem::path input_path(opts.input_path);
+    std::filesystem::path output_path(opts.output_path);
 
-    Params params;
-    params.NX = nx;
-    params.NY = ny;
-    params.NZ = nz;
-    params.D = d;
-    params.P = 0;
-    params.local_sum = Params::LocalSumMode::NeighborNarrow;
-    params.theta = 0;
-    Bitstream bitstream;
-    encode(image, bitstream, params);
-    write_file(opts.output_path, bitstream);
+    auto encode_single = [&](const std::filesystem::path &in_file, const std::filesystem::path &out_file) {
+      CliOptions local_opts = opts;
+      local_opts.input_path = in_file.string();
+      int nx = 0;
+      int ny = 0;
+      int nz = 0;
+      int d = 0;
+      const auto image = load_image(local_opts, nx, ny, nz, d);
+
+      Params params;
+      params.NX = nx;
+      params.NY = ny;
+      params.NZ = nz;
+      params.D = d;
+      params.P = 0;
+      params.local_sum = Params::LocalSumMode::NeighborNarrow;
+      params.theta = 0;
+
+      Bitstream bitstream;
+      encode(image, bitstream, params);
+      write_file(out_file, bitstream);
+    };
+
+    if (std::filesystem::is_directory(input_path)) {
+      require(!opts.force_ppm, "Directory inputs do not support --ppm");
+      if (std::filesystem::exists(output_path)) {
+        require(std::filesystem::is_directory(output_path),
+                "Output path must be a directory when encoding a sequence");
+      } else {
+        std::filesystem::create_directories(output_path);
+      }
+      std::vector<std::filesystem::path> inputs;
+      for (const auto &entry : std::filesystem::directory_iterator(input_path)) {
+        if (entry.is_regular_file()) {
+          inputs.push_back(entry.path());
+        }
+      }
+      std::sort(inputs.begin(), inputs.end());
+      require(!inputs.empty(), "No input frames found in directory");
+      for (const auto &file : inputs) {
+        auto out_file = output_path / file.stem();
+        out_file.replace_extension(".c123");
+        encode_single(file, out_file);
+      }
+    } else {
+      std::filesystem::path out_file = output_path;
+      if (std::filesystem::is_directory(out_file)) {
+        out_file /= input_path.stem();
+        out_file.replace_extension(".c123");
+      } else if (out_file.extension().empty()) {
+        out_file.replace_extension(".c123");
+      }
+      encode_single(input_path, out_file);
+    }
     return 0;
   } catch (const std::exception &ex) {
     std::cerr << "ccsds123_encode: " << ex.what() << "\n";

@@ -117,9 +117,10 @@ inline std::span<const std::uint8_t> Bitstream::bytes() const noexcept {
 }
 
 struct SampleAdaptiveCoderParams {
-  std::uint32_t initial_count{1};
-  std::uint32_t initial_sum{4};
-  std::uint32_t reset_threshold{128};
+  int u_max{18};
+  int counter_size{6};
+  int initial_count_exponent{1};
+  int kz_prime{0};
 };
 
 struct Params {
@@ -129,6 +130,9 @@ struct Params {
   int D{0};
   int P{0};
 
+  bool reduced{false};
+  bool column_oriented{false};
+
   enum class LocalSumMode { NeighborWide, NeighborNarrow, ColumnWide, ColumnNarrow };
   LocalSumMode local_sum{LocalSumMode::NeighborNarrow};
 
@@ -137,6 +141,12 @@ struct Params {
   std::vector<int> psi{};
   std::vector<int> az{};
   std::vector<int> rz{};
+
+  int omega{19};
+  int register_bits{64};
+  int v_min{-1};
+  int v_max{3};
+  int tinc_log{6};
 
   SampleAdaptiveCoderParams coder{};
 };

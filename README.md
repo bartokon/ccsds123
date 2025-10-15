@@ -29,12 +29,16 @@ implementations co-located:
   updated with the CCSDS scaling exponent schedule, and applied to the directional
   local differences. The predictor produces the scaled sample (2ŝ), enabling the
   residual mapper to follow Section 5.4.3 exactly.
-- **Sample-adaptive coder:** a unary/binary Golomb code with state
-  \((N_z, A_z) = (1, 4)\) and reset at 128 samples encodes the mapped indices.
-  The implementation keeps the arithmetic identical for host and AIE kernels.
-- **Container:** a 32-byte little-endian header (magic `C123`) precedes the bit
-  payload. Dimensions, predictor order, local-sum mode, and payload length are
-  embedded for decoder validation.
+- **Sample-adaptive coder:** the scalar path now mirrors the HDL configuration
+  used in `tools/conf.json` with \(U_{\max} = 18\), a six-bit counter, initial
+  count exponent of one, and \(K'_z = 0\). The unary/binary Golomb mapping and
+  accumulator updates match the VHDL implementation bit-for-bit, ensuring payload
+  identity between the software and hardware flows.
+- **Container:** a versioned little-endian header (magic `C123`) precedes the
+  bit payload. Dimensions, predictor order, local-sum mode, coder flags, and
+  payload length are embedded for decoder validation. Version 3 headers also
+  capture the weight-update and sample-adaptive coder parameters so tools can
+  round-trip containers without external configuration files.
 - **AIE integration:** `aie/aie_kernel.cc` offers fixed-size wrappers that call the
   library without dynamic allocation, exceptions, or RTTI inside kernels, matching
   the Vitis AI Engine compilation constraints.
@@ -116,7 +120,24 @@ Decoding back to BSQ:
 ```
 
 `ccsds123_encode` also accepts binary PPM (`P6`) input via `--ppm`, inferring the
-resolution from the header.
+resolution from the header. When the input path is a directory the tool scans all
+regular files, compressing each frame into an output directory (creating
+`frame_XXXX.c123` alongside the originals). Decoding mirrors this behaviour: a
+directory of `.c123` containers expands into BSQ frames using the stored
+dimensions.
+
+Synthetic multi-channel fixtures can be generated with
+`tools/generate_frames.py`. The script produces deterministic four-channel BSQ
+frames that exercise the CCSDS-123 pipeline:
+
+```bash
+python3 tools/generate_frames.py --frames 1 --nx 10 --ny 6 --nz 4 --output-dir tests/data
+./build/ccsds123_encode -i tests/data/frame_0001.bsq -o out/frame_0001.c123 -nx 10 -ny 6 -nz 4 -d 16
+./build/ccsds123_decode -i out/frame_0001.c123 -o out/frame_0001.bsq
+```
+
+The generated frame is reused by the unit tests to verify lossless round-trips
+for four-channel imagery.
 
 ## HDL comparison script
 

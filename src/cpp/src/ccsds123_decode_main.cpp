@@ -1,9 +1,11 @@
 #include "Ccsds123Codec.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -54,18 +56,21 @@ CliOptions parse_cli(int argc, char **argv) {
   return opts;
 }
 
-std::vector<std::uint8_t> read_file(const std::string &path) {
+std::vector<std::uint8_t> read_file(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
   require(in.good(), "Unable to open input file");
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-void write_bsq(const std::string &path, const ImageU16 &image, const Params &params) {
+void write_bsq(const std::filesystem::path &path, const ImageU16 &image, const Params &params) {
   const std::size_t samples = static_cast<std::size_t>(params.NX) * params.NY * params.NZ;
   std::vector<std::uint8_t> bytes(samples * sizeof(std::uint16_t));
   for (std::size_t i = 0; i < samples; ++i) {
     bytes[i * 2] = static_cast<std::uint8_t>(image[i] & 0xFFu);
     bytes[i * 2 + 1] = static_cast<std::uint8_t>((image[i] >> 8) & 0xFFu);
+  }
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path());
   }
   std::ofstream out(path, std::ios::binary);
   require(out.good(), "Unable to open output file");
@@ -77,18 +82,54 @@ void write_bsq(const std::string &path, const ImageU16 &image, const Params &par
 int main(int argc, char **argv) {
   try {
     const auto opts = parse_cli(argc, argv);
-    Bitstream bitstream;
-    const auto bytes = read_file(opts.input_path);
-    for (std::uint8_t byte : bytes) {
-      bitstream.push_back(byte);
-    }
-    const auto &const_bitstream = static_cast<const Bitstream &>(bitstream);
-    const auto summary = ccsds123::read_summary(const_bitstream.bytes());
+    const std::filesystem::path input_path(opts.input_path);
+    std::filesystem::path output_path(opts.output_path);
 
-    Params params = summary.params;
-    ImageU16 image;
-    decode(const_bitstream, image, params);
-    write_bsq(opts.output_path, image, params);
+    auto decode_single = [&](const std::filesystem::path &in_file, const std::filesystem::path &out_file) {
+      Bitstream bitstream;
+      const auto bytes = read_file(in_file);
+      for (std::uint8_t byte : bytes) {
+        bitstream.push_back(byte);
+      }
+      const auto &const_bitstream = static_cast<const Bitstream &>(bitstream);
+      const auto summary = ccsds123::read_summary(const_bitstream.bytes());
+
+      Params params = summary.params;
+      ImageU16 image;
+      decode(const_bitstream, image, params);
+      write_bsq(out_file, image, params);
+    };
+
+    if (std::filesystem::is_directory(input_path)) {
+      if (std::filesystem::exists(output_path)) {
+        require(std::filesystem::is_directory(output_path),
+                "Output path must be a directory when decoding a sequence");
+      } else {
+        std::filesystem::create_directories(output_path);
+      }
+      std::vector<std::filesystem::path> inputs;
+      for (const auto &entry : std::filesystem::directory_iterator(input_path)) {
+        if (entry.is_regular_file()) {
+          inputs.push_back(entry.path());
+        }
+      }
+      std::sort(inputs.begin(), inputs.end());
+      require(!inputs.empty(), "No input containers found in directory");
+      for (const auto &file : inputs) {
+        auto out_file = output_path / file.stem();
+        out_file.replace_extension(".bsq");
+        decode_single(file, out_file);
+      }
+    } else {
+      std::filesystem::path out_file = output_path;
+      if (std::filesystem::is_directory(out_file)) {
+        out_file /= input_path.stem();
+        out_file.replace_extension(".bsq");
+      } else if (out_file.extension().empty()) {
+        out_file.replace_extension(".bsq");
+      }
+      decode_single(input_path, out_file);
+    }
     return 0;
   } catch (const std::exception &ex) {
     std::cerr << "ccsds123_decode: " << ex.what() << "\n";

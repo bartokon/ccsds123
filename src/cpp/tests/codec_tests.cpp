@@ -6,7 +6,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <random>
+#include <sstream>
 #include <tuple>
 #include <vector>
 
@@ -23,6 +28,15 @@ Params make_default_params(int nx, int ny, int nz, int d) {
   params.P = 0;
   params.local_sum = Params::LocalSumMode::NeighborNarrow;
   params.theta = 0;
+  params.omega = 19;
+  params.register_bits = 64;
+  params.v_min = -1;
+  params.v_max = 3;
+  params.tinc_log = 6;
+  params.coder.u_max = 18;
+  params.coder.counter_size = 6;
+  params.coder.initial_count_exponent = 1;
+  params.coder.kz_prime = 0;
   return params;
 }
 
@@ -168,7 +182,7 @@ TEST_CASE("predictor_handles_prev_band_and_numerator") {
   modules::CtrlSignals first_ctrl{};
   first_ctrl.first_line = true;
   first_ctrl.first_in_line = true;
-  first_ctrl.scale_exponent = -6;
+  first_ctrl.scale_exponent = -1;
 
   modules::PredictorInputs first_inputs{};
   first_inputs.ctrl = first_ctrl;
@@ -185,7 +199,7 @@ TEST_CASE("predictor_handles_prev_band_and_numerator") {
   modules::CtrlSignals ctrl{};
   ctrl.first_line = false;
   ctrl.first_in_line = false;
-  ctrl.scale_exponent = -4;
+  ctrl.scale_exponent = -1;
 
   modules::PredictorInputs general_inputs{};
   general_inputs.ctrl = ctrl;
@@ -207,7 +221,7 @@ TEST_CASE("weight_update_resets_and_tracks_error_sign") {
   modules::CtrlSignals reset_ctrl{};
   reset_ctrl.first_line = true;
   reset_ctrl.first_in_line = true;
-  modules::WeightUpdateInputs reset_inputs{reset_ctrl, 4, 4, -6, 9, 0, 0, diffs};
+  modules::WeightUpdateInputs reset_inputs{reset_ctrl, 4, 4, -1, 3, 0, 0, diffs};
   modules::weight_update(weights, reset_inputs, false);
   const auto expected_reset = modules::init_weights(false, 4, static_cast<int>(weights.size()));
   REQUIRE(weights == expected_reset);
@@ -217,12 +231,12 @@ TEST_CASE("weight_update_resets_and_tracks_error_sign") {
   ctrl.first_line = false;
   ctrl.first_in_line = false;
 
-  modules::WeightUpdateInputs increase_inputs{ctrl, 4, 4, -6, 9, 16, 12, diffs};
+  modules::WeightUpdateInputs increase_inputs{ctrl, 4, 4, -1, 3, 16, 12, diffs};
   modules::weight_update(weights, increase_inputs, false);
   const auto after_increase = weights;
   REQUIRE(std::all_of(after_increase.begin(), after_increase.begin() + 3, [](int32_t v) { return v > 0; }));
 
-  modules::WeightUpdateInputs decrease_inputs{ctrl, 4, 4, -6, 9, 32, 0, diffs};
+  modules::WeightUpdateInputs decrease_inputs{ctrl, 4, 4, -1, 3, 32, 0, diffs};
   modules::weight_update(weights, decrease_inputs, false);
   for (std::size_t i = 0; i < after_increase.size(); ++i) {
     REQUIRE(weights[i] <= after_increase[i]);
@@ -254,7 +268,10 @@ TEST_CASE("control_sequence_scans_bip_order") {
   const int nx = 4;
   const int ny = 3;
   const int nz = 2;
-  modules::ControlState control({nx, ny, nz, -6, 9, 4});
+  const int v_min = -1;
+  const int v_max = 3;
+  const int tinc_log = 6;
+  modules::ControlState control({nx, ny, nz, v_min, v_max, tinc_log});
   std::vector<std::tuple<int, int, int>> visited;
   visited.reserve(static_cast<std::size_t>(nx) * ny * nz);
   std::vector<int> scale_exponents;
@@ -277,10 +294,50 @@ TEST_CASE("control_sequence_scans_bip_order") {
       REQUIRE(std::get<2>(entry) == z);
     }
   }
-  REQUIRE(scale_exponents.front() == -6);
-  REQUIRE(std::all_of(scale_exponents.begin(), scale_exponents.end(), [](int v) {
-    return v >= -6 && v <= 9;
+  REQUIRE(scale_exponents.front() == v_min);
+  REQUIRE(std::all_of(scale_exponents.begin(), scale_exponents.end(), [&](int v) {
+    return v >= v_min && v <= v_max;
   }));
-  REQUIRE(std::is_sorted(scale_exponents.begin(), scale_exponents.end()));
+  REQUIRE(std::adjacent_find(scale_exponents.begin(), scale_exponents.end(), std::greater<int>()) ==
+          scale_exponents.end());
+}
+
+TEST_CASE("four_channel_frame_roundtrip") {
+  const int frame_nx = 10;
+  const int frame_ny = 6;
+  const int frame_nz = 4;
+  const std::filesystem::path repo_root(PROJECT_SOURCE_DIR);
+  const auto script = repo_root / "tools" / "generate_frames.py";
+  const auto data_dir = repo_root / "tests" / "data";
+  const auto frame_path = data_dir / "frame_0001.bsq";
+
+  auto quote = [](const std::filesystem::path &path) {
+    std::ostringstream ss;
+    ss << '"' << path.string() << '"';
+    return ss.str();
+  };
+
+  std::ostringstream command;
+  command << "python3 " << quote(script) << " --output-dir " << quote(data_dir) << " --frames 1"
+          << " --nx " << frame_nx << " --ny " << frame_ny << " --nz " << frame_nz;
+  REQUIRE(std::system(command.str().c_str()) == 0);
+
+  std::ifstream in(frame_path, std::ios::binary);
+  REQUIRE(in.good());
+  const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  const std::size_t expected_bytes = static_cast<std::size_t>(frame_nx) * frame_ny * frame_nz * sizeof(std::uint16_t);
+  REQUIRE(bytes.size() == expected_bytes);
+
+  ImageU16 frame(bytes.size() / 2);
+  for (std::size_t i = 0; i < frame.size(); ++i) {
+    frame[i] = static_cast<std::uint16_t>(bytes[i * 2] | (static_cast<std::uint16_t>(bytes[i * 2 + 1]) << 8));
+  }
+
+  auto params = make_default_params(frame_nx, frame_ny, frame_nz, 16);
+  Bitstream bitstream;
+  encode(frame, bitstream, params);
+  ImageU16 recon;
+  decode(bitstream, recon, params);
+  REQUIRE(recon == frame);
 }
 
