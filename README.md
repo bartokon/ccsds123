@@ -1,13 +1,116 @@
-# CCSDS123 #
+# CCSDS-123 Reference Codec
 
-An FPGA implementation of the CCSDS123 compression algorithm. Developed and tested on the Xilinx Zynq-7000 series.
+This repository provides a C++20 reference port of the CCSDS 123.0-B-2 lossless
+pipeline. The implementation targets CPU builds and serves as the scalar path for
+AMD Versal AI Engine kernels. The current milestone covers RGB imagery (three bands
+in BSQ layout) with narrow neighbour-oriented local sums and the sample-adaptive
+Golomb entropy coder.
 
-Featured in
+## Design highlights
 
-[J. Fjeldtvedt, M. Orlandić, T. A. Johansen, ”An Efficient Real-Time FPGA Implementation of the CCSDS-123 Compression Standard for Hyperspectral Images”, IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing, 2018](https://ieeexplore.ieee.org/document/8472142)
+- **One-to-one module ports:** the control, local-difference, dot-product,
+  predictor, weight-update, and residual-mapper VHDL units are translated directly
+  into `ccsds123::modules`. Each function mirrors the original fixed-point
+  arithmetic, mod-2\(^R\) accumulator, Θ computation, and parity-dependent mapping
+  logic so the C++ pipeline matches the HDL cycle-by-cycle.
+- **Stateful predictor:** adaptive weights are initialised as in the Blue Book,
+  updated with the CCSDS scaling exponent schedule, and applied to the directional
+  local differences. The predictor produces the scaled sample (2ŝ), enabling the
+  residual mapper to follow Section 5.4.3 exactly.
+- **Sample-adaptive coder:** a unary/binary Golomb code with state
+  \((N_z, A_z) = (1, 4)\) and reset at 128 samples encodes the mapped indices.
+  The implementation keeps the arithmetic identical for host and AIE kernels.
+- **Container:** a 32-byte little-endian header (magic `C123`) precedes the bit
+  payload. Dimensions, predictor order, local-sum mode, and payload length are
+  embedded for decoder validation.
+- **AIE integration:** `aie/aie_kernel.cc` offers fixed-size wrappers that call the
+  library without dynamic allocation, exceptions, or RTTI inside kernels, matching
+  the Vitis AI Engine compilation constraints.
 
-[M. Orlandić, J. Fjeldtvedt, T. A. Johansen, ”A Parallel FPGA Implementation of the CCSDS-123 Compression Algorithm”, Remote Sensing, 2019](https://www.mdpi.com/2072-4292/11/6/673)
+## Building
 
-Created as part of my [master thesis](https://brage.bibsys.no/xmlui/handle/11250/2566932) at NTNU.
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
 
-Licensed under the MIT License, see LICENSE for more information.
+The build generates:
+
+- `libccsds123` — static library
+- `ccsds123_encode` / `ccsds123_decode` — CLI tools
+- `ccsds123_tests` — Catch2 regression suite
+
+## Testing
+
+```bash
+ctest --test-dir build -V
+```
+
+Unit tests cover RGB round-trips, random fixed-seed imagery, local-difference
+cases from the VHDL pipeline, residual mapping invertibility, and the control
+module’s scan order.
+
+To exercise the HDL comparison helper (currently looping back the reference
+image), run:
+
+```bash
+cmake --build build -j --target hdl_ref
+```
+
+This target generates an 8×8 gradient BSQ image in the build directory, then feeds
+both the reference and “HDL” paths to `tools/hdl_compare.py`.
+
+## Command-line tools
+
+Encoding raw BSQ (`u16le`) data:
+
+```bash
+python3 - <<'PY' > /tmp/rgb8x8_u16le.bsq
+from itertools import product
+out = bytearray()
+for z in range(3):
+    for y in range(8):
+        for x in range(8):
+            val = (x * 5 + y * 3 + z * 11) & 0xFF
+            out += val.to_bytes(2, 'little')
+open('/tmp/rgb8x8_u16le.bsq', 'wb').write(out)
+PY
+./build/ccsds123_encode -i /tmp/rgb8x8_u16le.bsq -o out.bin -nx 8 -ny 8 -nz 3 -d 8
+```
+
+Decoding back to BSQ:
+
+```bash
+./build/ccsds123_decode -i out.bin -o recon.bsq
+```
+
+`ccsds123_encode` also accepts binary PPM (`P6`) input via `--ppm`, inferring the
+resolution from the header.
+
+## HDL comparison script
+
+`tools/hdl_compare.py` compares reconstructed pixels or predictor residuals against
+files produced by the HDL environment. Example usage once an HDL dump is available:
+
+```bash
+python3 tools/hdl_compare.py --nx 8 --ny 8 --nz 3 --depth 16 \
+    --reference build/rgb8x8_u16le.bsq \
+    --hdl-recon path/to/hdl_reconstructed.bsq \
+    --hdl-residuals path/to/hdl_residuals.txt
+```
+
+The script reports coordinate-labelled mismatches (first 20) and length
+inconsistencies.
+
+## Notes on parameter choices
+
+- **Narrow neighbour sums:** eliminate direct left-sample dependencies while
+  matching CCSDS Section 3.4.3, easing AIE pipelining.
+- **Predictor order \(P = 0\):** RGB uses intra-band prediction for this milestone;
+  previous-band taps and near-lossless quantisation knobs are staged for follow-up
+  work.
+- **Θ, ϕ, ψ, aᵢ, rᵢ:** zeroed so the quantiser acts as an identity for lossless
+  validation.
+
+Future milestones will extend the library with near-lossless modes, the hybrid
+coder, Issue-1 compatibility switches, and vectorised AIE paths.
