@@ -1,19 +1,19 @@
 package synth_params is
 constant V_MAX : integer := 3;
 constant KZ_PRIME : integer := 3;
-constant PIPELINES : integer := 10;
+constant PIPELINES : integer := 1;
 constant D : integer := 16;
 constant P : integer := 3;
 constant TINC_LOG : integer := 6;
 constant COUNTER_SIZE : integer := 6;
 constant COL_ORIENTED : boolean := false;
-constant BUS_WIDTH : integer := 64;
+constant BUS_WIDTH : integer := 32;
 constant LITTLE_ENDIAN : boolean := true;
-constant NX : integer := 512;
-constant NY : integer := 2000;
-constant NZ : integer := 128;
+constant NX : integer := 614;
+constant NY : integer := 512;
+constant NZ : integer := 10;
 constant R : integer := 64;
-constant ISUNSIGNED : boolean := false;
+constant ISUNSIGNED : boolean := true;
 constant UMAX : integer := 18;
 constant OMEGA : integer := 19;
 constant REDUCED : boolean := false;

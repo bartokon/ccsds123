@@ -7,9 +7,15 @@ endif
 
 SHELL := /bin/bash
 
+PYTHON ?= python3
+HDL_CONFIG ?= tools/conf.json
+HDL_PARAM_SCRIPT ?= tools/gen_impl_params.py
+HDL_PARAM_DIR ?= hdl/tb
+HDL_PARAM_FILES := $(HDL_PARAM_DIR)/impl_params.v $(HDL_PARAM_DIR)/synth_params.vhd
+
 VIVADO_ENV := source "$(SETTINGS_SCRIPT)" &&
 
-.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-project hdl-sim hdl-clean clean
+.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean clean
 
 help:
 	@echo "Available targets:"
@@ -37,14 +43,19 @@ cpp: cpp-test
 cpp-clean:
 	rm -rf $(CPP_BUILD_DIR)
 
+
 $(HDL_BUILD_DIR):
 	@mkdir -p $@
 
-hdl-project: $(HDL_BUILD_DIR)
-	bash -c '$(VIVADO_ENV) "$(VIVADO)" -mode batch -source "$(HDL_SCRIPT)" -tclargs "$(abspath $(HDL_BUILD_DIR))" $(VIVADO_PROJECT_NAME) $(VIVADO_PART) $(VIVADO_BOARD) $(HDL_SIM_TOP) project-only'
+hdl-params:
+	@mkdir -p $(HDL_PARAM_DIR)
+	$(PYTHON) $(HDL_PARAM_SCRIPT) $(HDL_CONFIG)
 
-hdl-sim: $(HDL_BUILD_DIR)
-	bash -c '$(VIVADO_ENV) "$(VIVADO)" -mode batch -source "$(HDL_SCRIPT)" -tclargs "$(abspath $(HDL_BUILD_DIR))" $(VIVADO_PROJECT_NAME) $(VIVADO_PART) $(VIVADO_BOARD) $(HDL_SIM_TOP) simulate'
+hdl-project: hdl-params $(HDL_BUILD_DIR)
+	bash -c 'HDL_SKIP_PARAM_GEN=1 PYTHON="$(PYTHON)" $(VIVADO_ENV) "$(VIVADO)" -mode batch -source "$(HDL_SCRIPT)" -tclargs "$(abspath $(HDL_BUILD_DIR))" $(VIVADO_PROJECT_NAME) $(VIVADO_PART) $(VIVADO_BOARD) $(HDL_SIM_TOP) project-only'
+
+hdl-sim: hdl-params $(HDL_BUILD_DIR)
+	bash -c 'HDL_SKIP_PARAM_GEN=1 PYTHON="$(PYTHON)" $(VIVADO_ENV) "$(VIVADO)" -mode batch -source "$(HDL_SCRIPT)" -tclargs "$(abspath $(HDL_BUILD_DIR))" $(VIVADO_PROJECT_NAME) $(VIVADO_PART) $(VIVADO_BOARD) $(HDL_SIM_TOP) simulate'
 
 hdl-clean:
 	rm -rf $(HDL_BUILD_DIR)

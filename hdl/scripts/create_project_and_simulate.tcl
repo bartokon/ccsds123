@@ -51,21 +51,30 @@ if {![file exists $config_file]} {
     exit 1
 }
 
-set python_exec python3
-if {[info exists ::env(PYTHON)]} {
-    set python_exec $::env(PYTHON)
+set skip_param_gen 0
+if {[info exists ::env(HDL_SKIP_PARAM_GEN)] && $::env(HDL_SKIP_PARAM_GEN) ne "0"} {
+    set skip_param_gen 1
 }
 
-set gen_params_script [file join $tools_dir gen_impl_params.py]
-if {![file exists $gen_params_script]} {
-    puts "Parameter generation script '$gen_params_script' not found."
-    exit 1
-}
+if {!$skip_param_gen} {
+    set python_exec python3
+    if {[info exists ::env(PYTHON)]} {
+        set python_exec $::env(PYTHON)
+    }
 
-set gen_status [catch {exec $python_exec $gen_params_script $config_file} gen_result]
-if {$gen_status != 0} {
-    puts "Failed to generate implementation parameters: $gen_result"
-    exit 1
+    set gen_params_script [file join $tools_dir gen_impl_params.py]
+    if {![file exists $gen_params_script]} {
+        puts "Parameter generation script '$gen_params_script' not found."
+        exit 1
+    }
+
+    set gen_status [catch {exec $python_exec $gen_params_script $config_file} gen_result]
+    if {$gen_status != 0} {
+        puts "Failed to generate implementation parameters: $gen_result"
+        exit 1
+    }
+} else {
+    puts "Skipping parameter generation: HDL_SKIP_PARAM_GEN=$::env(HDL_SKIP_PARAM_GEN)"
 }
 
 file mkdir $build_dir

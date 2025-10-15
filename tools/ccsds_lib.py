@@ -49,9 +49,25 @@ def convert(image_desc, to_order, out_filename):
                         (image_desc["filename"], image_desc["order"], out_filename, to_order,
                          image_desc["NX"], image_desc["NY"], image_desc["NZ"]), shell=True)
 
+def _pipeline_count(parameters):
+    return parameters["PIPELINES"] if "PIPELINES" in parameters else 1
+
+
+def _locsum_mode(parameters):
+    return parameters.get("locsum_mode", "neighbor")
+
+
+def _mode(parameters):
+    return parameters.get("mode", "full")
+
+
+def _out_endianness(parameters):
+    return parameters.get("out_endianness", "little")
+
+
 def write_sim_params(dimensions, parameters, signed, filename):
     sim_params = {
-        "PIPELINES": parameters["PIPELINES"] if "PIPELINES" in parameters else 1,
+        "PIPELINES": _pipeline_count(parameters),
         "NX": dimensions[0],
         "NY": dimensions[1],
         "NZ": dimensions[2],
@@ -66,16 +82,56 @@ def write_sim_params(dimensions, parameters, signed, filename):
         "COUNTER_SIZE": parameters["COUNTER_SIZE"],
         "INITIAL_COUNT": parameters["INITIAL_COUNT"],
         "UMAX": parameters["UMAX"],
-        "COL_ORIENTED": 1 if parameters["locsum_mode"] == "column" else 0,
-        "REDUCED": 1 if parameters["mode"] == "reduced" else 0,
-        "LITTLE_ENDIAN": 1 if parameters["out_endianness"] == "little" else 0,
+        "COL_ORIENTED": 1 if _locsum_mode(parameters) == "column" else 0,
+        "REDUCED": 1 if _mode(parameters) == "reduced" else 0,
+        "LITTLE_ENDIAN": 1 if _out_endianness(parameters) == "little" else 0,
         "BUS_WIDTH": 8 * int(parameters["out_word_size"]),
         "ISUNSIGNED": 1 if not signed else 0,
-        }
+    }
 
     with open(filename, 'w') as f:
         for (param_name, val) in sim_params.items():
             f.write("parameter %s = %s;\n" % (param_name, val))
+
+
+def write_vhdl_params(dimensions, parameters, signed, filename):
+    bool_to_vhdl = {True: "true", False: "false"}
+    entries = [
+        ("V_MAX", parameters["V_MAX"], "integer"),
+        ("KZ_PRIME", parameters["K"], "integer"),
+        ("PIPELINES", _pipeline_count(parameters), "integer"),
+        ("D", parameters["D"], "integer"),
+        ("P", parameters["P"], "integer"),
+        ("TINC_LOG", parameters["TINC_LOG"], "integer"),
+        ("COUNTER_SIZE", parameters["COUNTER_SIZE"], "integer"),
+        (
+            "COL_ORIENTED",
+            bool_to_vhdl[_locsum_mode(parameters) == "column"],
+            "boolean",
+        ),
+        ("BUS_WIDTH", 8 * int(parameters["out_word_size"]), "integer"),
+        (
+            "LITTLE_ENDIAN",
+            bool_to_vhdl[_out_endianness(parameters) == "little"],
+            "boolean",
+        ),
+        ("NX", dimensions[0], "integer"),
+        ("NY", dimensions[1], "integer"),
+        ("NZ", dimensions[2], "integer"),
+        ("R", parameters["R"], "integer"),
+        ("ISUNSIGNED", bool_to_vhdl[not signed], "boolean"),
+        ("UMAX", parameters["UMAX"], "integer"),
+        ("OMEGA", parameters["OMEGA"], "integer"),
+        ("REDUCED", bool_to_vhdl[_mode(parameters) == "reduced"], "boolean"),
+        ("V_MIN", parameters["V_MIN"], "integer"),
+        ("INITIAL_COUNT", parameters["INITIAL_COUNT"], "integer"),
+    ]
+
+    with open(filename, 'w') as vhdl_file:
+        vhdl_file.write("package synth_params is\n")
+        for name, value, type_name in entries:
+            vhdl_file.write(f"constant {name} : {type_name} := {value};\n")
+        vhdl_file.write("end synth_params;\n")
 
 def file_size(filename):
     return os.stat(filename).st_size
