@@ -1,8 +1,8 @@
 # Milestones
 
 ## Upcoming
-- [ ] Restore Vivado project generation by running implementation parameter synthesis outside the Vivado TCL environment to avoid restricted Python executables.
-- [ ] Align CPP, HDL, and AIE implementations for deterministic regression testing with shared stimuli.
+- [x] Restore Vivado project generation by running implementation parameter synthesis outside the Vivado TCL environment to avoid restricted Python executables.
+- [x] Align CPP, HDL, and AIE implementations for deterministic regression testing with shared stimuli.
 - [ ] Add near-lossless compression modes and hybrid coder pathways with ISSUE-1 compatibility switches.
 - [ ] Prototype vectorised AIE data paths for accelerated processing.
 - [ ] Expand automated documentation derived from `docs/` research notes.

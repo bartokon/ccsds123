@@ -51,30 +51,15 @@ if {![file exists $config_file]} {
     exit 1
 }
 
-set skip_param_gen 0
-if {[info exists ::env(HDL_SKIP_PARAM_GEN)] && $::env(HDL_SKIP_PARAM_GEN) ne "0"} {
-    set skip_param_gen 1
-}
+set sim_param_file [file join $tb_dir impl_params.v]
+set synth_param_file [file join $tb_dir synth_params.vhd]
 
-if {!$skip_param_gen} {
-    set python_exec python3
-    if {[info exists ::env(PYTHON)]} {
-        set python_exec $::env(PYTHON)
-    }
-
-    set gen_params_script [file join $tools_dir gen_impl_params.py]
-    if {![file exists $gen_params_script]} {
-        puts "Parameter generation script '$gen_params_script' not found."
+foreach param_file [list $sim_param_file $synth_param_file] {
+    if {![file exists $param_file]} {
+        puts "Required parameter file '$param_file' not found."
+        puts "Run the external parameter generation helper (make hdl-params) before invoking this script."
         exit 1
     }
-
-    set gen_status [catch {exec $python_exec $gen_params_script $config_file} gen_result]
-    if {$gen_status != 0} {
-        puts "Failed to generate implementation parameters: $gen_result"
-        exit 1
-    }
-} else {
-    puts "Skipping parameter generation: HDL_SKIP_PARAM_GEN=$::env(HDL_SKIP_PARAM_GEN)"
 }
 
 file mkdir $build_dir

@@ -12,10 +12,12 @@ HDL_CONFIG ?= tools/conf.json
 HDL_PARAM_SCRIPT ?= tools/gen_impl_params.py
 HDL_PARAM_DIR ?= hdl/tb
 HDL_PARAM_FILES := $(HDL_PARAM_DIR)/impl_params.v $(HDL_PARAM_DIR)/synth_params.vhd
+COCOTB_LOCAL_DIFF_DIR ?= hdl/cocotb/local_diff
+COCOTB_LOCAL_DIFF_VECTORS ?= tests/vectors/local_diff_vectors.csv
 
 VIVADO_ENV := source "$(SETTINGS_SCRIPT)" &&
 
-.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean clean
+.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean hdl-cocotb-local-diff clean
 
 help:
 	@echo "Available targets:"
@@ -50,6 +52,13 @@ $(HDL_BUILD_DIR):
 hdl-params:
 	@mkdir -p $(HDL_PARAM_DIR)
 	$(PYTHON) $(HDL_PARAM_SCRIPT) $(HDL_CONFIG)
+
+$(COCOTB_LOCAL_DIFF_VECTORS): tools/gen_local_diff_vectors.py python_reference/local_diff.py $(HDL_CONFIG)
+	$(PYTHON) tools/gen_local_diff_vectors.py $(HDL_CONFIG) $(COCOTB_LOCAL_DIFF_VECTORS)
+
+hdl-cocotb-local-diff: $(COCOTB_LOCAL_DIFF_VECTORS)
+	$(MAKE) -C $(COCOTB_LOCAL_DIFF_DIR) LOCAL_DIFF_VECTOR_CSV="$(abspath $(COCOTB_LOCAL_DIFF_VECTORS))" LOCAL_DIFF_COLUMN_ORIENTED=0
+	$(MAKE) -C $(COCOTB_LOCAL_DIFF_DIR) LOCAL_DIFF_VECTOR_CSV="$(abspath $(COCOTB_LOCAL_DIFF_VECTORS))" LOCAL_DIFF_COLUMN_ORIENTED=1
 
 hdl-project: hdl-params $(HDL_BUILD_DIR)
 	bash -c 'HDL_SKIP_PARAM_GEN=1 PYTHON="$(PYTHON)" $(VIVADO_ENV) "$(VIVADO)" -mode batch -source "$(HDL_SCRIPT)" -tclargs "$(abspath $(HDL_BUILD_DIR))" $(VIVADO_PROJECT_NAME) $(VIVADO_PART) $(VIVADO_BOARD) $(HDL_SIM_TOP) project-only'

@@ -26,9 +26,11 @@ target_link_libraries(ccsds123_decode PRIVATE ccsds123)
 
 if(BUILD_TESTING)
     add_executable(ccsds123_tests
-        tests/codec_tests.cpp)
+        tests/codec_tests.cpp
+        tests/local_diff_vectors.cpp)
     target_include_directories(ccsds123_tests PRIVATE tests)
     target_link_libraries(ccsds123_tests PRIVATE ccsds123)
+    target_compile_definitions(ccsds123_tests PRIVATE PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME codec_unit_tests COMMAND ccsds123_tests)
 endif()
 
