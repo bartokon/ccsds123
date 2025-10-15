@@ -158,12 +158,17 @@ begin
   -- Convert unsigned to signed if necessary
   g_signed_convert : if (ISUNSIGNED) generate
     process (in_data)
-      variable sample : std_logic_vector(D-1 downto 0);
+      variable sample  : unsigned(D-1 downto 0);
+      variable centered : signed(D-1 downto 0);
+      constant OFFSET   : integer := 2**(D-1);
     begin
       for i in 0 to PIPELINES-1 loop
-        sample                           := in_data((i+1)*D-1 downto i*D);
-        sample(D-1)                      := not sample(D-1);
-        in_samples((i+1)*D-1 downto i*D) <= sample;
+        sample := unsigned(in_data((i+1)*D-1 downto i*D));
+        -- The software implementation centres unsigned samples around zero by
+        -- subtracting 2^(D-1). Replicate that behaviour so the downstream
+        -- residual mapper and Golomb coder observe identical statistics.
+        centered := to_signed(to_integer(sample) - OFFSET, D);
+        in_samples((i+1)*D-1 downto i*D) <= std_logic_vector(centered);
       end loop;
     end process;
   end generate g_signed_convert;
