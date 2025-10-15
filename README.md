@@ -81,8 +81,12 @@ metrics to the console.
 `make compare` extends the flow by compiling the C++ reference, encoding the same
 gradient, and running `tools/compare_bitstreams.py`. The helper strips the C++
 container header, compares the payload bits against the HDL dump, and reports the
-compression ratio using the shared input size. A matching payload confirms that
-the hardware path and the software codec remain in lock-step.
+compression ratio using the shared input size. The behavioural test bench now
+pre-loads the BSQ input cube and feeds the DUT with band-interleaved (BIP) samples,
+mirroring the control logic inside the compressor. A matching payload confirms that
+the hardware path and the software codec remain in lock-step. A synthesizable input
+re-ordering stage will follow in a future milestone so that board-level designs can
+accept BSQ streams directly.
 
 `tools/hdl_compare.py` stays available for reconstructed-image comparisons once a
 decoded dump is produced.

@@ -91,6 +91,7 @@ begin
         --------------------------------------------------------------------------------
         -- Stage 1 - Compute terms in local sum
         --------------------------------------------------------------------------------
+        local_sum_term1 <= 0;
         local_sum_term2 <= 0;
         if (COL_ORIENTED) then
           if (in_ctrl.first_line = '0') then

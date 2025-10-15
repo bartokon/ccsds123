@@ -66,29 +66,30 @@ module top_tb;
   integer total_cycles;
   integer stalled_cycles;
 
+  reg [D-1:0] sample_mem [0:TOTAL_SAMPLES-1];
+
   task automatic load_word(output reg [PIPELINES*D-1:0] word, output integer samples_loaded);
     integer lane;
-    integer byte_index;
-    integer value;
-    reg [7:0] byte_value;
+    integer pixel_index;
+    integer band_index;
+    integer band_stride;
+    integer x_coord;
+    integer y_coord;
+    integer bsq_index;
     reg [D-1:0] sample_word;
   begin
     word = {PIPELINES*D{1'b0}};
     samples_loaded = 0;
+    band_stride = NX * NY;
     for (lane = 0; lane < PIPELINES; lane = lane + 1) begin
       sample_word = {D{1'b0}};
       if (next_sample_index < TOTAL_SAMPLES) begin
-        for (byte_index = 0; byte_index < SAMPLE_BYTES; byte_index = byte_index + 1) begin
-          value = $fgetc(in_file);
-          if (value == -1) begin
-            $display("ERROR: Unexpected end of input at sample %0d, byte %0d", next_sample_index, byte_index);
-            value = 0;
-          end else begin
-            input_bytes = input_bytes + 1;
-          end
-          byte_value = value & 8'hFF;
-          sample_word[byte_index*8 +: 8] = byte_value;
-        end
+        pixel_index = next_sample_index / NZ;
+        band_index = next_sample_index % NZ;
+        x_coord = pixel_index % NX;
+        y_coord = pixel_index / NX;
+        bsq_index = band_index * band_stride + y_coord * NX + x_coord;
+        sample_word = sample_mem[bsq_index];
         next_sample_index = next_sample_index + 1;
         samples_loaded = samples_loaded + 1;
       end
@@ -119,6 +120,32 @@ module top_tb;
       $finish;
     end
 
+    begin : load_input_file
+      integer sample_idx;
+      integer byte_index;
+      integer value;
+      reg [7:0] byte_value;
+      reg [D-1:0] sample_word;
+      for (sample_idx = 0; sample_idx < TOTAL_SAMPLES; sample_idx = sample_idx + 1) begin
+        sample_word = {D{1'b0}};
+        for (byte_index = 0; byte_index < SAMPLE_BYTES; byte_index = byte_index + 1) begin
+          value = $fgetc(in_file);
+          if (value == -1) begin
+            $display("ERROR: Unexpected end of input at sample %0d, byte %0d", sample_idx, byte_index);
+            value = 0;
+          end else begin
+            input_bytes = input_bytes + 1;
+          end
+          byte_value = value[7:0];
+          sample_word[byte_index*8 +: 8] = byte_value;
+        end
+        sample_mem[sample_idx] = sample_word;
+      end
+    end
+    $fclose(in_file);
+
+    next_sample_index = 0;
+
     load_word(next_word, samples_loaded);
     in_tdata <= next_word;
     in_tvalid <= (samples_loaded > 0);
@@ -146,7 +173,6 @@ module top_tb;
 
     @(posedge clk);
     in_tvalid <= 1'b0;
-    $fclose(in_file);
   end
 
   initial begin : capture_outputs
