@@ -1,0 +1,1147 @@
+# INSTRUCTIONS FOR VITIS AND VITIS LIBRARIES DEVELOPMENT
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Vitis Ecosystem Architecture](#vitis-ecosystem-architecture)
+3. [Vitis Libraries Structure](#vitis-libraries-structure)
+4. [Development Environment Setup](#development-environment-setup)
+5. [Vitis Python API Reference](#vitis-python-api-reference)
+6. [GMIO vs PLIO Implementation Guide](#gmio-vs-plio-implementation-guide)
+7. [Configuration Management](#configuration-management)
+8. [Build System Integration](#build-system-integration)
+9. [Project Structure and File Organization](#project-structure-and-file-organization)
+10. [Common Implementation Patterns](#common-implementation-patterns)
+11. [Troubleshooting and Best Practices](#troubleshooting-and-best-practices)
+12. [Step-by-Step Implementation Examples](#step-by-step-implementation-examples)
+
+---
+
+## Overview
+
+This document provides comprehensive technical instructions for LLMs to understand and implement Vitis-based projects, specifically focusing on AIE-ML vision accelerators using the Vitis Libraries. It covers both GMIO (memory-mapped) and PLIO (streaming) implementation approaches.
+
+### Key Technologies Covered
+- **AMD/Xilinx Vitis 2025.1** - Unified software platform
+- **AIE-ML (AI Engine Machine Learning)** - Adaptable AI/ML compute engines
+- **Vitis Libraries Vision L1/L2** - Pre-built IP and functions
+- **Vitis Python API** - Programmatic project management
+- **XRT (Xilinx Runtime Library)** - Runtime for host-device communication
+- **OpenCV integration** - Computer vision reference implementations
+
+---
+
+## Vitis Ecosystem Architecture
+
+### 1. Three-Layer Architecture
+
+```
+┌─────────────────────────────────────────┐
+│           HOST APPLICATION              │
+│     (ARM/x86, C++, OpenCV, XRT)        │
+├─────────────────────────────────────────┤
+│         PROGRAMMABLE LOGIC (PL)        │
+│    (FPGA Fabric, HLS Kernels, AXI)     │
+├─────────────────────────────────────────┤
+│          AI ENGINE (AIE/AIE-ML)         │
+│     (Vector Processing, Data Flow)      │
+└─────────────────────────────────────────┘
+```
+
+### 2. Data Movement Patterns
+
+#### GMIO (Global Memory I/O)
+- **Memory-mapped interface** between host and AIE
+- **Direct DDR access** via memory controllers
+- **Simpler system integration** but limited bandwidth
+- **Best for**: Prototyping, single-tile processing
+
+#### PLIO (Programmable Logic I/O)  
+- **AXI4-Stream interface** between PL and AIE
+- **Streaming data movement** via dedicated PL kernels
+- **Higher performance** but more complex integration
+- **Best for**: Production systems, multi-tile processing
+
+---
+
+## Vitis Libraries Structure
+
+### 1. Directory Hierarchy
+
+```
+Vitis_Libraries/
+├── vision/
+│   ├── L1/                           # Low-level primitives
+│   │   ├── include/
+│   │   │   ├── aie/                  # AIE headers (legacy)
+│   │   │   ├── aie-ml/              # AIE-ML headers (preferred)
+│   │   │   ├── common/              # Common utilities
+│   │   │   └── imgproc/             # Image processing functions
+│   │   └── lib/
+│   │       ├── sw/                  # Software libraries
+│   │       │   ├── aarch64-linux/   # ARM64 libraries
+│   │       │   └── x86/             # x86 libraries  
+│   │       └── hw/                  # Hardware kernels (.xo files)
+│   │           ├── tiler.xo         # PLIO tiler kernel
+│   │           └── stitcher.xo      # PLIO stitcher kernel
+│   └── L2/                          # High-level examples/tests
+│       └── tests/aie-ml/filter2d/   # Filter2D implementations
+│           ├── 16bit_aie_gmio/      # GMIO reference
+│           └── 16bit_aie_8bit_pl/   # PLIO reference
+```
+
+### 2. Critical Include Paths
+
+**For AIE-ML Development:**
+```cpp
+// Primary headers (AIE-ML optimized)
+#include "imgproc/xf_filter2d_16b_aieml.hpp"  // 16-bit filter implementation
+#include "common/xf_aie_sw_utils.hpp"         // Software utilities  
+#include "common/xfcvDataMovers.h"            // Data movement helpers
+
+// Core AIE framework
+#include "adf.h"                              // ADF graph framework
+```
+
+### 3. Library Dependencies
+
+**Build-time Dependencies:**
+- `smartTilerStitcher` - Automatic tiling/stitching library
+- OpenCV libraries (core, imgproc, imgcodecs, etc.)
+- XRT runtime libraries (xrt_coreutil)
+
+**Runtime Dependencies:**
+- XRT (Xilinx Runtime) installed on target
+- Platform-specific drivers and firmware
+
+---
+
+## Development Environment Setup
+
+### 1. Environment Configuration Script
+
+**Template: `setup.sh`**
+```bash
+#!/bin/bash
+
+# Load Xilinx configuration from YAML (recommended pattern)
+XILINX_PATH=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['xilinx']['path'])")
+XILINX_VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['xilinx']['version'])")
+source $XILINX_PATH/$XILINX_VERSION/Vitis/settings64.sh
+```
+
+### 2. Required Environment Variables
+
+After sourcing Vitis settings64.sh:
+```bash
+# Core Vitis paths
+XILINX_VITIS=/tools/Xilinx/2025.1/Vitis
+XILINX_XRT=/opt/xilinx/xrt
+
+# Python paths for Vitis API
+PYTHONPATH=$XILINX_XRT/python:$XILINX_VITIS/functional_suite/vfs/python:$XILINX_VITIS/functional_suite/varray/python:$XILINX_VITIS/functional_suite/lib/python
+
+# Runtime libraries
+LD_LIBRARY_PATH=$XILINX_XRT/lib
+```
+
+### 3. Platform and Sysroot Requirements
+
+**Platform Structure:**
+```
+platform_repo/
+├── platform_name/
+│   └── export/
+│       └── platform_name/
+│           └── platform_name.xpfm    # Platform file
+```
+
+**Sysroot Structure (for embedded targets):**
+```  
+sysroot/
+├── usr/
+│   ├── include/
+│   │   ├── opencv4/                  # OpenCV headers
+│   │   └── xrt/                      # XRT headers
+│   └── lib/                          # Runtime libraries
+│       ├── libxrt_coreutil.so       # XRT core utilities
+│       └── libopencv_*.so           # OpenCV libraries
+```
+
+---
+
+## Vitis Python API Reference
+
+### 1. Core Client Operations
+
+```python
+import vitis
+import os
+
+# Create and configure client
+client = vitis.create_client()
+client.set_workspace("/path/to/workspace")
+
+# Add platform repository
+client.add_platform_repos("/path/to/platform/repo")
+```
+
+### 2. AIE Component Creation and Configuration
+
+```python
+# Create AIE component
+aie_component = client.create_aie_component(
+    name="aie_component",
+    platform="/path/to/platform.xpfm", 
+    template="empty_aie_component"
+)
+
+# Import source files
+aie_component.import_files(
+    files=["graph.cpp", "graph.h", "config.h", "kernels.h", "xf_filter2d.cc"],
+    from_loc="aie_src",
+    dest_dir_in_cmp=""
+)
+
+# Configure compiler settings
+cfg = client.get_config_file(path=f"{workspace}/aie_component/aiecompiler.cfg")
+cfg.add_lines(section="", lines=[
+    "include=/path/to/vitis_libraries/vision/L1/include/aie-ml",
+    "include=/path/to/vitis_libraries/vision/L1/include"
+])
+cfg.add_lines(section="aie", lines=[
+    "xlopt=2",           # Optimization level
+    "stacksize=8192",    # Stack size
+    "pl-freq=300"        # PL clock frequency
+])
+
+# Set top-level file and build
+aie_component.update_top_level_file(top_level_file="graph.cpp")
+aie_component.build(target="hw")  # or "x86sim"
+```
+
+### 3. Host Application Component
+
+```python
+# Create application component  
+app_component = client.create_app_component(
+    name="app_component",
+    platform="/path/to/platform.xpfm"
+)
+
+# Configure sysroot for cross-compilation
+app_component.set_sysroot("/path/to/sysroot")
+app_component.update_sysroot_toolchain(
+    sysroot_toolchain="/path/to/toolchain"
+)
+app_component.use_sysroot_toolchain(use_sysroot_toolchain=True)
+
+# Import application files
+app_component.import_files(
+    files=["host.cpp"],
+    from_loc="app_src", 
+    dest_dir_in_cmp=""
+)
+
+# Configure build settings
+app_component.append_app_config(
+    key="USER_INCLUDE_DIRECTORIES",
+    values=[
+        "/path/to/vitis_libraries/vision/L1/include/aie-ml",
+        "/path/to/sysroot/usr/include/opencv4",
+        "/path/to/sysroot/usr/include/xrt"
+    ]
+)
+
+app_component.append_app_config(
+    key="USER_LINK_LIBRARIES", 
+    values=["smartTilerStitcher", "opencv_core", "opencv_imgproc", "xrt_coreutil"]
+)
+
+app_component.build(target="hw")
+```
+
+### 4. System Project Integration
+
+#### For GMIO Systems:
+```python
+project = client.create_sys_project(
+    name="system_project",
+    platform="/path/to/platform.xpfm",
+    template="empty_accelerated_application"
+)
+
+project.add_container(name="binary_container_1")
+project.add_component(name="app_component")
+project.add_component(name="aie_component", container_name="binary_container_1")
+```
+
+#### For PLIO Systems:
+```python
+project = client.create_sys_project(
+    name="system_project", 
+    platform="/path/to/platform.xpfm",
+    template="empty_accelerated_application"
+)
+
+project.add_container(name="binary_container_1")
+
+# Add system.cfg for PLIO connectivity
+project.add_cfg_files(cfg_files=["system.cfg"], name="binary_container_1")
+
+# Add precompiled datamover kernels
+project.add_precompiled_kernel(
+    xo_file_path="/path/to/tiler.xo",
+    containers=["binary_container_1"]
+)
+project.add_precompiled_kernel(
+    xo_file_path="/path/to/stitcher.xo", 
+    containers=["binary_container_1"]
+)
+
+project.add_component(name="app_component")
+project.add_component(name="aie_component", container_name="binary_container_1")
+```
+
+### 5. Configuration File Management
+
+```python
+# Package configuration
+cfg = client.get_config_file(path=f"{workspace}/project/package/package.cfg")
+cfg.add_lines(section="package", lines=[
+    "defer_aie_run=true",      # Defer AIE execution
+    "enable_aie_debug=false"   # Debug settings
+])
+
+# Set individual configuration values
+cfg.set_value(section="package", key="enable_aie_debug", value="false")
+```
+
+---
+
+## GMIO vs PLIO Implementation Guide
+
+### 1. GMIO Implementation Pattern
+
+#### AIE Graph (graph.h):
+```cpp
+#include "adf.h"
+#include "config.h"
+#include "kernels.h"
+
+using namespace adf;
+
+class myGraph : public adf::graph {
+public:
+    kernel k1;
+    input_gmio inptr;                    // Memory-mapped input
+    output_gmio outptr;                  // Memory-mapped output
+    port<input> kernelCoefficients;      // Runtime parameter port
+
+    myGraph() {
+        k1 = kernel::create(filter2D_api);
+        
+        // GMIO interfaces with burst size and queue depth
+        inptr = input_gmio::create("gmioIn1", 256, 1000);
+        outptr = output_gmio::create("gmioOut1", 256, 1000);
+        
+        // Graph connections
+        adf::connect<>(inptr.out[0], k1.in[0]);
+        adf::connect<parameter>(kernelCoefficients, async(k1.in[1])); 
+        adf::connect<>(k1.out[0], outptr.in[0]);
+        
+        // Buffer dimensions (including metadata)
+        adf::dimensions(k1.in[0]) = {ELEM_WITH_METADATA};
+        adf::dimensions(k1.out[0]) = {ELEM_WITH_METADATA};
+        
+        // Performance constraints
+        adf::source(k1) = "xf_filter2d.cc";
+        adf::runtime<ratio>(k1) = 0.8;
+        adf::location<kernel>(k1) = tile(7,0);  // Optional placement
+    }
+};
+```
+
+#### GMIO Host Application Pattern:
+```cpp
+#include <common/xfcvDataMovers.h>
+#include <experimental/xrt_graph.h>
+#include "graph.cpp"  // Include for coefficients
+
+// Data movement setup
+xF::xfcvDataMovers<xF::TILER, int16_t, TILE_HEIGHT, TILE_WIDTH, VECTORIZATION_FACTOR, 1, 0, true> 
+    tiler(1, 1);
+xF::xfcvDataMovers<xF::STITCHER, int16_t, TILE_HEIGHT, TILE_WIDTH, VECTORIZATION_FACTOR, 1, 0, true> 
+    stitcher;
+
+// Execute processing
+auto tiles_sz = tiler.host2aie_nb(srcData.data(), src.size(), {"filter_graph.inptr"});
+stitcher.aie2host_nb(dstData.data(), dst.size(), tiles_sz, {"filter_graph.outptr"});
+```
+
+### 2. PLIO Implementation Pattern
+
+#### AIE Graph (graph.h):
+```cpp
+#include "adf.h"
+#include "config.h"
+#include "kernels.h"
+
+using namespace adf;
+
+class myGraph : public adf::graph {
+public:
+    kernel k1;
+    input_plio inptr;                    // Streaming input
+    output_plio outptr;                  // Streaming output
+    port<input> kernelCoefficients;
+
+    myGraph() {
+        k1 = kernel::create(filter2D_api);
+        
+        // PLIO interfaces with width and test files
+        inptr = input_plio::create("DataIn1", adf::plio_128_bits, "data/input_128x16.txt");
+        outptr = output_plio::create("DataOut1", adf::plio_128_bits, "data/output.txt");
+        
+        // Graph connections (same as GMIO)
+        adf::connect<>(inptr.out[0], k1.in[0]);
+        adf::connect<parameter>(kernelCoefficients, async(k1.in[1]));
+        adf::connect<>(k1.out[0], outptr.in[0]);
+        
+        // Buffer dimensions
+        adf::dimensions(k1.in[0]) = {ELEM_WITH_METADATA};
+        adf::dimensions(k1.out[0]) = {ELEM_WITH_METADATA};
+        
+        // Source and constraints
+        adf::source(k1) = "xf_filter2d.cc";
+        adf::runtime<ratio>(k1) = 0.8;
+    }
+};
+```
+
+#### PLIO System Configuration (system.cfg):
+```cfg
+[connectivity]
+# Instantiate PL kernels
+nk=Tiler_top:1
+nk=stitcher_top:1
+
+# Stream connections: PL → AIE → PL
+stream_connect=Tiler_top_1.OutputStream:ai_engine_0.DataIn1
+stream_connect=ai_engine_0.DataOut1:stitcher_top_1.InputStream
+
+[advanced]
+# Compiler optimizations
+param=compiler.skipTimingCheckAndFrequencyScaling=true
+param=compiler.addOutputTypes=hw_export
+param=compiler.userPostSysLinkOverlayTcl=./post_linker.tcl
+
+[vivado]
+# Implementation directives for performance
+prop=run.impl_1.STEPS.OPT_DESIGN.ARGS.DIRECTIVE=Explore
+prop=run.impl_1.STEPS.PLACE_DESIGN.ARGS.DIRECTIVE=Explore
+prop=run.impl_1.STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE=AggressiveExplore
+```
+
+#### PLIO Post-Linker Configuration (post_linker.tcl):
+```tcl
+# Kernel instance configuration
+set TilerInstances [list [list "Tiler_top_1" 0]]
+set StitcherInstances [list [list "stitcher_top_1" 0]]
+
+# Configure pixel types and data widths
+foreach inst_info $TilerInstances {
+    configTiler \
+        AIEPixelType $PixelType("XF_16UC1") \
+        TilerInstInfo $inst_info
+}
+
+foreach inst_info $StitcherInstances {
+    configStitcher \
+        AIEPixelType $PixelType("XF_16UC1") \
+        StitcherInstInfo $inst_info
+}
+```
+
+#### PLIO Host Application Pattern:
+```cpp
+#include <experimental/xrt_kernel.h>
+#include <experimental/xrt_graph.h>
+#include "config.h"
+#include "graph.cpp"
+
+// XRT graph management (required for PLIO)
+auto gHndl = xrt::graph(xF::gpDhdl, xF::xclbin_uuid, "filter_graph");
+gHndl.reset();
+gHndl.update("filter_graph.k1.in[1]", float2fixed_coeff<10, 16>(kData));
+
+// Data movement (similar to GMIO but with XRT buffer objects)
+xrt::bo src_hndl = xrt::bo(xF::gpDhdl, (srcImageR.total() * srcImageR.elemSize()), 0, 0);
+xrt::bo* ptr_dstHndl = new xrt::bo(xF::gpDhdl, (op_height * op_width * srcImageR.elemSize()), 0, 0);
+
+xF::xfcvDataMovers<xF::TILER, int16_t, TILE_HEIGHT, TILE_WIDTH, VECTORIZATION_FACTOR> 
+    tiler(1, 1, false, 6);
+xF::xfcvDataMovers<xF::STITCHER, int16_t, TILE_HEIGHT, TILE_WIDTH, VECTORIZATION_FACTOR> 
+    stitcher;
+
+// Execute with graph control
+auto tiles_sz = tiler.host2aie_nb(&src_hndl, srcImageR.size());
+stitcher.aie2host_nb(ptr_dstHndl, dst.size(), tiles_sz);
+
+gHndl.run(tiles_sz[0] * tiles_sz[1]);  // Run for number of tiles
+gHndl.wait();
+
+tiler.wait();
+stitcher.wait();
+```
+
+---
+
+## Configuration Management
+
+### 1. Centralized YAML Configuration Pattern
+
+**Template: `config.yaml`**
+```yaml
+# Project configuration
+project:
+  workspace_name: vitis_workspace_project_name
+
+# Xilinx tool configuration  
+xilinx:
+  path: /tools/Xilinx/
+  version: 2025.1
+
+# Target platform
+platform:
+  name: platform_name
+  repo_root_rel: ../platform_repo
+  dfx_subdir: platform_dfx_name
+  xpfm_rel: export/platform_name/platform_name.xpfm
+
+# Cross-compilation sysroot
+sysroot:
+  root: /path/to/sysroot
+  toolchain: /path/to/toolchain
+
+# Vitis Libraries paths
+vision:
+  L1_root_rel: ../Vitis_Libraries/vision/L1
+
+# AIE component configuration
+aie:
+  src_dir: aie_src
+  src_files:
+    - graph.cpp
+    - graph.h  
+    - config.h
+    - kernels.h
+    - xf_filter2d.cc
+  compiler:
+    xlopt: 2
+    stacksize: 8192
+    pl_freq: 300
+
+# Host application configuration
+app:
+  src_dir: app_src
+  src_files:
+    - host.cpp
+
+# Build configuration
+build:
+  cmake_cxx_standard: 17
+  optimization_level: -O3
+  debug_level: ""
+  compile_definitions:
+    - __PS_ENABLE_AIE__
+  link_libraries:
+    - smartTilerStitcher
+    - opencv_videoio
+    - opencv_imgcodecs
+    - opencv_core
+    - opencv_imgproc
+    - opencv_features2d
+    - opencv_flann
+    - opencv_video
+    - opencv_calib3d
+    - opencv_highgui
+    - xrt_coreutil
+    - uuid
+
+# Package configuration
+package:
+  defer_aie_run: true
+  enable_aie_debug: false
+
+# PLIO-specific configuration (add for PLIO projects)
+plio:
+  system_cfg: system.cfg
+  post_linker_tcl: post_linker.tcl
+  xrt_ini: xrt.ini
+  input_data_dir: data
+  input_data_file: data/input_128x16.txt
+  tiler_kernel: Tiler_top
+  stitcher_kernel: stitcher_top
+  input_stream: DataIn1
+  output_stream: DataOut1
+
+# HLS component configuration (for PLIO)
+hls:
+  tiler_xo_rel: ../Vitis_Libraries/vision/L1/lib/hw/tiler.xo
+  stitcher_xo_rel: ../Vitis_Libraries/vision/L1/lib/hw/stitcher.xo
+  tiler_top_function: Tiler_top
+  stitcher_top_function: stitcher_top
+```
+
+### 2. Configuration Loading Pattern
+
+```python
+import yaml
+import os
+
+# Load configuration
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(ROOT_DIR, "config.yaml"), "r") as f:
+    CONFIG = yaml.safe_load(f)
+
+# Path resolution helpers
+def get_absolute_path(relative_path):
+    return os.path.join(ROOT_DIR, relative_path)
+
+def get_platform_path():
+    platform_repo = get_absolute_path(CONFIG["platform"]["repo_root_rel"])
+    platform_dfx = CONFIG["platform"]["dfx_subdir"] 
+    xpfm_rel = CONFIG["platform"]["xpfm_rel"]
+    return os.path.join(platform_repo, platform_dfx, xpfm_rel)
+```
+
+---
+
+## Build System Integration
+
+### 1. Makefile Integration Pattern
+
+```makefile
+# Build targets
+.PHONY: all clean rebuild
+PROJECT_NAME := edge_detection
+
+# Environment setup and execution
+all: $(PROJECT_NAME)
+
+$(PROJECT_NAME):
+	@echo "Building $(PROJECT_NAME) with Vitis Python API..."
+	source setup.sh && vitis -s build_project_$(PROJECT_NAME).py
+
+clean_$(PROJECT_NAME):
+	@echo "Cleaning $(PROJECT_NAME) workspace..."
+	rm -rf vitis_workspace_$(PROJECT_NAME)
+
+rebuild_$(PROJECT_NAME): clean_$(PROJECT_NAME) $(PROJECT_NAME)
+	@echo "Rebuild $(PROJECT_NAME) completed"
+
+# Simulation targets  
+$(PROJECT_NAME)_x86sim:
+	@echo "Running x86 simulation..."
+	source setup.sh && $(MAKE) -C vitis_workspace_$(PROJECT_NAME)/aie_component TARGET=x86sim
+
+$(PROJECT_NAME)_aiesim:
+	@echo "Running AIE simulation..." 
+	source setup.sh && $(MAKE) -C vitis_workspace_$(PROJECT_NAME)/aie_component TARGET=aiesim
+
+clean:
+	rm -rf vitis_workspace_*
+```
+
+### 2. Build Script Template
+
+**Template: `build_project_name.py`**
+```python
+import vitis
+import os
+import yaml
+
+# Configuration loading
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(ROOT_DIR, "config.yaml"), "r") as f:
+    CONFIG = yaml.safe_load(f)
+
+# Path setup
+WORKSPACE = os.path.join(os.getcwd(), CONFIG["project"]["workspace_name"])
+PLATFORM_XPFM = # ... resolve platform path
+SYSROOT = CONFIG["sysroot"]["root"]
+VISION_LIB_ROOT = os.path.join(os.getcwd(), CONFIG["vision"]["L1_root_rel"])
+
+if __name__ == "__main__":
+    client = vitis.create_client()
+    client.set_workspace(WORKSPACE)
+    client.add_platform_repos(# ... platform repo path)
+    
+    # AIE Component
+    aie_component = client.create_aie_component(
+        name="aie_component",
+        platform=PLATFORM_XPFM,
+        template="empty_aie_component"
+    )
+    # ... configure aie component
+    
+    # App Component  
+    app_component = client.create_app_component(
+        name="app_component",
+        platform=PLATFORM_XPFM
+    )
+    # ... configure app component
+    
+    # System Project
+    project = client.create_sys_project(
+        name="system_project",
+        platform=PLATFORM_XPFM,
+        template="empty_accelerated_application"
+    )
+    # ... configure project
+```
+
+---
+
+## Project Structure and File Organization
+
+### 1. Recommended Directory Structure
+
+```
+project_root/
+├── config.yaml                    # Centralized configuration
+├── setup.sh                       # Environment setup
+├── Makefile                       # Build orchestration
+├── build_project_name.py          # Vitis build script
+├── system.cfg                     # PLIO system configuration (if needed)
+├── post_linker.tcl                # PLIO post-linker script (if needed) 
+├── xrt.ini                        # XRT runtime configuration (if needed)
+├── data/                          # Test data for simulation
+│   └── input_128x16.txt           # AIE simulation input
+├── aie_src/                       # AIE source files
+│   ├── graph.h                    # Graph definition
+│   ├── graph.cpp                  # Graph instantiation & test
+│   ├── config.h                   # Configuration constants
+│   ├── kernels.h                  # Kernel function declarations
+│   └── xf_filter2d.cc            # Kernel implementation
+├── app_src/                       # Host application source
+│   └── host.cpp                   # Main host application
+└── vitis_workspace_name/          # Generated workspace (gitignore)
+    ├── aie_component/
+    ├── app_component/ 
+    └── system_project/
+```
+
+### 2. Critical File Patterns
+
+#### AIE Configuration Header (config.h):
+```cpp
+#ifndef __CONFIG_H_
+#define __CONFIG_H_
+
+#include <common/xf_aie_const.hpp>
+
+// Tile dimensions (must match tiler configuration)
+using DATA_TYPE = int16_t;
+static constexpr int TILE_WIDTH = 128;      // Power of 2
+static constexpr int TILE_HEIGHT = 64;      // Power of 2
+
+// Computed values
+static constexpr int TILE_ELEMENTS = TILE_WIDTH * TILE_HEIGHT;
+static constexpr int TILE_WINDOW_SIZE = ((TILE_ELEMENTS * sizeof(DATA_TYPE)) + xf::cv::aie::METADATA_SIZE);
+static constexpr int ELEM_WITH_METADATA = TILE_ELEMENTS + (xf::cv::aie::METADATA_SIZE / sizeof(DATA_TYPE));
+
+// Performance configuration
+static constexpr int VECTORIZATION_FACTOR = 16;  // AIE-ML vector width
+
+// Compilation targets
+static constexpr int __X86_DEVICE__ = 0;         // 0 for hardware, 1 for x86sim
+
+#endif //__CONFIG_H_
+```
+
+#### Kernel Function Declaration (kernels.h):
+```cpp
+#ifndef _KERNELS_H_
+#define _KERNELS_H_
+
+#include <adf/window/types.h>
+#include <adf/stream/types.h>
+#include "adf.h"
+
+// Kernel function signature (must match implementation)
+void filter2D_api(adf::input_buffer<int16>& input, 
+                  const int16_t (&coeff)[16], 
+                  adf::output_buffer<int16>& output);
+
+#endif
+```
+
+#### Kernel Implementation (xf_filter2d.cc):
+```cpp
+#include "imgproc/xf_filter2d_16b_aieml.hpp"
+#include "kernels.h"
+
+void filter2D_api(adf::input_buffer<int16>& input, 
+                  const int16_t (&coeff)[16], 
+                  adf::output_buffer<int16>& output) {
+    xf::cv::aie::filter2D(input, coeff, output);
+}
+```
+
+---
+
+## Common Implementation Patterns
+
+### 1. Error Handling and Validation
+
+```python
+def validate_paths(config):
+    """Validate all required paths exist"""
+    required_paths = [
+        config["sysroot"]["root"],
+        config["platform"]["repo_root_rel"], 
+        config["vision"]["L1_root_rel"]
+    ]
+    
+    for path in required_paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required path not found: {path}")
+
+def validate_vitis_environment():
+    """Validate Vitis environment is properly set up"""
+    try:
+        import vitis
+        print("Vitis Python API available")
+        return True
+    except ImportError:
+        print("ERROR: Vitis Python API not available. Source setup.sh first.")
+        return False
+```
+
+### 2. Configuration Testing Patterns
+
+```bash
+# Test YAML configuration loading
+python3 -c "import yaml; config=yaml.safe_load(open('config.yaml')); print('Config OK')"
+
+# Test Vitis environment
+source setup.sh && vitis -s -c "import vitis; print('Vitis OK')"
+
+# Test path resolution
+python3 -c "
+import yaml, os
+config = yaml.safe_load(open('config.yaml'))
+platform_path = os.path.join(config['platform']['repo_root_rel'], config['platform']['dfx_subdir'])
+print(f'Platform exists: {os.path.exists(platform_path)}')
+"
+```
+
+### 3. Build Verification Patterns
+
+```bash
+# Check AIE build success
+grep -i "error\|fail" vitis_workspace_*/aie_component/build/hw/AIECompiler.log || echo "AIE build OK"
+
+# Check for critical files
+test -f vitis_workspace_*/aie_component/build/hw/Work/libadf.a && echo "AIE archive OK"
+
+# Check app build success  
+test -f vitis_workspace_*/app_component/build/hw/host && echo "Host app OK"
+```
+
+---
+
+## Troubleshooting and Best Practices
+
+### 1. Common Build Issues and Solutions
+
+#### "Component already exists" Error:
+```bash
+# Solution: Clean workspace before rebuild
+rm -rf vitis_workspace_*
+make rebuild_project_name
+```
+
+#### "No kernels found in component" Error:
+```python
+# Issue: Trying to create HLSComponent for .xo files
+# Solution: Use precompiled kernels instead
+
+# Wrong approach:
+hls_component = client.create_hls_component(...)
+hls_component.import_files(files=["kernel.xo"], ...)
+
+# Correct approach:
+project.add_precompiled_kernel(
+    xo_file_path="/path/to/kernel.xo",
+    containers=["binary_container_1"]
+)
+```
+
+#### "add_cfg_files() unexpected keyword" Error:
+```python  
+# Wrong API usage:
+project.add_cfg_files(files=["system.cfg"])
+
+# Correct API usage:
+project.add_cfg_files(cfg_files=["system.cfg"], name="binary_container_1")
+```
+
+#### Missing Include Paths:
+```python
+# Always include both aie-ml and base paths
+cfg.add_lines(section="", lines=[
+    f"include={VISION_LIB_ROOT}/include/aie-ml",    # AIE-ML optimized
+    f"include={VISION_LIB_ROOT}/include/aie",       # Legacy compatibility
+    f"include={VISION_LIB_ROOT}/include"            # Common utilities
+])
+```
+
+### 2. Performance Optimization Guidelines
+
+#### AIE Compiler Settings:
+```yaml
+aie:
+  compiler:
+    xlopt: 2                    # Maximum optimization
+    stacksize: 8192            # Sufficient stack
+    pl_freq: 300               # Match platform capabilities
+```
+
+#### Tile Size Optimization:
+```cpp  
+// Optimal tile sizes for AIE-ML (powers of 2)
+// Balance between: memory usage, compute efficiency, boundary overhead
+
+// Good choices:
+static constexpr int TILE_WIDTH = 128;   // 128x64 = 8192 elements
+static constexpr int TILE_HEIGHT = 64;   
+
+// Also good:
+static constexpr int TILE_WIDTH = 256;   // 256x32 = 8192 elements  
+static constexpr int TILE_HEIGHT = 32;
+
+// Avoid odd sizes or sizes that don't fit AIE memory efficiently
+```
+
+#### Vectorization Guidelines:
+```cpp
+// AIE-ML supports 16-element vectorization for int16
+static constexpr int VECTORIZATION_FACTOR = 16;
+
+// Must be consistent across:
+// 1. AIE kernel implementation
+// 2. Host tiler/stitcher configuration
+// 3. Buffer dimension calculations
+```
+
+### 3. Debug and Verification Techniques
+
+#### Simulation Testing:
+```bash
+# Test AIE kernel in isolation
+make project_name_x86sim
+
+# Look for success indicators
+grep -i "test passed\|simulation completed" build_logs/
+
+# Check simulation output
+ls vitis_workspace_*/aie_component/build/x86sim/
+```
+
+#### Hardware Verification:
+```cpp
+// Add verification in host application
+cv::Mat diff;
+cv::absdiff(reference_output, aie_output, diff);
+cv::imwrite("diff.png", diff);
+
+float error_percentage;
+analyzeDiff(diff, 2, error_percentage);  // From xf_aie_sw_utils.hpp
+if (error_percentage > 0.0f) {
+    std::cerr << "Verification failed: " << error_percentage << "% error" << std::endl;
+    exit(-1);
+}
+```
+
+---
+
+## Step-by-Step Implementation Examples
+
+### 1. Create New GMIO Filter2D Project
+
+```bash
+# 1. Create project structure
+mkdir new_filter2d_gmio
+cd new_filter2d_gmio
+mkdir aie_src app_src
+
+# 2. Create configuration
+cat > config.yaml << EOF
+project:
+  workspace_name: vitis_workspace_filter2d
+# ... rest of config template
+EOF
+
+# 3. Create environment setup
+cat > setup.sh << 'EOF' 
+#!/bin/bash
+XILINX_PATH=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['xilinx']['path'])")
+XILINX_VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['xilinx']['version'])")
+source $XILINX_PATH/$XILINX_VERSION/Vitis/settings64.sh
+EOF
+
+# 4. Copy reference implementation
+cp /path/to/reference/gmio/aie_src/* ./aie_src/
+cp /path/to/reference/gmio/host.cpp ./app_src/
+
+# 5. Create build script (use template above)
+# 6. Create Makefile (use template above)  
+# 7. Build and test
+make rebuild_filter2d
+```
+
+### 2. Migrate Existing GMIO to PLIO
+
+```bash
+# 1. Backup current implementation
+cp -r current_project current_project_gmio_backup
+
+# 2. Copy PLIO source files
+cp /path/to/plio/reference/aie_src/* ./aie_src/
+cp /path/to/plio/reference/host.cpp ./app_src/
+cp /path/to/plio/reference/system.cfg ./
+cp /path/to/plio/reference/post_linker.tcl ./
+cp -r /path/to/plio/reference/data ./
+
+# 3. Update config.yaml (add PLIO and HLS sections)
+# 4. Update build script (replace HLSComponent creation with precompiled kernels)
+# 5. Test configuration
+python3 -c "import yaml; yaml.safe_load(open('config.yaml')); print('Config OK')"
+
+# 6. Build and verify
+make rebuild_project_name
+```
+
+### 3. Create Custom Filter Kernel
+
+```cpp
+// 1. Define custom kernel in kernels.h
+void custom_filter_api(adf::input_buffer<int16>& input,
+                       const int16_t (&coeff)[9],     // 3x3 kernel
+                       adf::output_buffer<int16>& output);
+
+// 2. Implement in custom_filter.cc
+#include "imgproc/xf_filter2d_16b_aieml.hpp"
+#include "kernels.h"
+
+void custom_filter_api(adf::input_buffer<int16>& input,
+                       const int16_t (&coeff)[9], 
+                       adf::output_buffer<int16>& output) {
+    // Convert 3x3 to 16-element array (AIE-ML format)
+    int16_t aie_coeff[16];
+    std::fill(aie_coeff, aie_coeff + 16, 0);
+    
+    // Map 3x3 kernel to AIE layout
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            aie_coeff[i * 4 + j] = coeff[i * 3 + j];
+        }
+    }
+    
+    xf::cv::aie::filter2D(input, aie_coeff, output);
+}
+
+// 3. Update graph.h to use new kernel
+k1 = kernel::create(custom_filter_api);
+
+// 4. Update config.yaml to include new source file
+aie:
+  src_files:
+    - graph.cpp
+    - graph.h
+    - config.h
+    - kernels.h
+    - custom_filter.cc    # Add new file
+```
+
+---
+
+## Advanced Topics
+
+### 1. Multi-Kernel Graphs
+
+```cpp
+class multi_kernel_graph : public adf::graph {
+public:
+    kernel k1, k2;
+    input_plio inptr;
+    output_plio outptr;
+    
+    multi_kernel_graph() {
+        k1 = kernel::create(filter_stage1);
+        k2 = kernel::create(filter_stage2);
+        
+        inptr = input_plio::create("DataIn1", adf::plio_128_bits, "data/input.txt");
+        outptr = output_plio::create("DataOut1", adf::plio_128_bits, "data/output.txt");
+        
+        // Pipeline connection
+        adf::connect<>(inptr.out[0], k1.in[0]);
+        adf::connect<>(k1.out[0], k2.in[0]);
+        adf::connect<>(k2.out[0], outptr.in[0]);
+        
+        // Performance constraints
+        adf::runtime<ratio>(k1) = 0.8;
+        adf::runtime<ratio>(k2) = 0.8;
+    }
+};
+```
+
+### 2. Platform-Specific Optimizations
+
+```cpp
+// AIE-ML specific optimizations
+#if defined(__AIE_ARCH__) && __AIE_ARCH__ == 20
+    // AIE-ML optimized code path
+    static constexpr int VECTORIZATION_FACTOR = 16;
+    static constexpr int OPTIMAL_TILE_SIZE = 8192;
+#else
+    // AIE legacy fallback
+    static constexpr int VECTORIZATION_FACTOR = 8; 
+    static constexpr int OPTIMAL_TILE_SIZE = 4096;
+#endif
+```
+
+### 3. Runtime Parameter Updates
+
+```cpp
+// Host side parameter update (PLIO)
+auto gHndl = xrt::graph(xF::gpDhdl, xF::xclbin_uuid, "filter_graph");
+
+// Update kernel coefficients at runtime
+std::array<int16_t, 16> new_coefficients = generate_kernel();
+gHndl.update("filter_graph.k1.in[1]", new_coefficients);
+```
+
+---
+
+## Conclusion
+
+This comprehensive guide covers all essential aspects of Vitis development for AIE-ML vision accelerators. Key takeaways:
+
+1. **Use centralized YAML configuration** for maintainable builds
+2. **Follow the direct file copy approach** for proven implementations  
+3. **Understand GMIO vs PLIO tradeoffs** for your use case
+4. **Leverage Vitis Libraries** for optimized implementations
+5. **Test thoroughly** with simulation before hardware deployment
+6. **Monitor build logs** for early error detection
+
+For successful implementation:
+- Start with reference implementations from Vitis Libraries
+- Adapt gradually to your specific requirements
+- Maintain consistent file organization and naming
+- Use proper error handling and validation
+- Document platform-specific configurations
+
+This guide provides the foundation for creating robust, high-performance vision accelerators using the Vitis ecosystem.

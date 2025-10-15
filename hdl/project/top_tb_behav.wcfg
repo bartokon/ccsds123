@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wave_config>
+   <wave_state>
+   </wave_state>
+   <db_ref_list>
+      <db_ref path="top_tb_behav.wdb" id="1">
+         <top_modules>
+            <top_module name="common" />
+            <top_module name="glbl" />
+            <top_module name="top_tb" />
+            <top_module name="vcomponents" />
+         </top_modules>
+      </db_ref>
+   </db_ref_list>
+   <zoom_setting>
+      <ZoomStartTime time="2499421666666fs"></ZoomStartTime>
+      <ZoomEndTime time="2500421666667fs"></ZoomEndTime>
+      <Cursor1Time time="2500255000000fs"></Cursor1Time>
+   </zoom_setting>
+   <column_width_setting>
+      <NameColumnWidth column_width="222"></NameColumnWidth>
+      <ValueColumnWidth column_width="79"></ValueColumnWidth>
+   </column_width_setting>
+   <WVObjectSize size="22" />
+   <wvobject type="logic" fp_name="/top_tb/clk">
+      <obj_property name="ElementShortName">clk</obj_property>
+      <obj_property name="ObjectShortName">clk</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/aresetn">
+      <obj_property name="ElementShortName">aresetn</obj_property>
+      <obj_property name="ObjectShortName">aresetn</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/top_tb/i">
+      <obj_property name="ElementShortName">i[31:0]</obj_property>
+      <obj_property name="ObjectShortName">i[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="other" fp_name="/top_tb/i_top/from_ctrl_z">
+      <obj_property name="ElementShortName">from_ctrl_z</obj_property>
+      <obj_property name="ObjectShortName">from_ctrl_z</obj_property>
+      <obj_property name="CustomSignalColor">#FFFF00</obj_property>
+      <obj_property name="UseCustomSignalColor">true</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/from_ctrl_ctrl.first_line">
+      <obj_property name="ElementShortName">.first_line</obj_property>
+      <obj_property name="ObjectShortName">.first_line</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/from_ctrl_ctrl.first_in_line">
+      <obj_property name="ElementShortName">.first_in_line</obj_property>
+      <obj_property name="ObjectShortName">.first_in_line</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/from_ctrl_ctrl.last_in_line">
+      <obj_property name="ElementShortName">.last_in_line</obj_property>
+      <obj_property name="ObjectShortName">.last_in_line</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/from_ctrl_ctrl.last">
+      <obj_property name="ElementShortName">.last</obj_property>
+      <obj_property name="ObjectShortName">.last</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider133" type="divider">
+      <obj_property name="label">LOCAL DIFF</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">#FFD700</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider122" type="divider">
+      <obj_property name="label">DOT PRODUCT</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">#FFD700</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider121" type="divider">
+      <obj_property name="label">PREDICTED</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">#FFD700</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider130" type="divider">
+      <obj_property name="label">WEIGHT UPDATE</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">#FFD700</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider281" type="divider">
+      <obj_property name="label">RESIDUAL MAPPER</obj_property>
+      <obj_property name="DisplayName">label</obj_property>
+      <obj_property name="BkColor">#FFD700</obj_property>
+   </wvobject>
+   <wvobject fp_name="divider178" type="divider">
+   </wvobject>
+   <wvobject type="array" fp_name="/top_tb/i_top/i_packer/in_words">
+      <obj_property name="ElementShortName">in_words[33:0]</obj_property>
+      <obj_property name="ObjectShortName">in_words[33:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/top_tb/i_top/i_packer/in_lengths">
+      <obj_property name="ElementShortName">in_lengths[5:0]</obj_property>
+      <obj_property name="ObjectShortName">in_lengths[5:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/i_packer/in_valid">
+      <obj_property name="ElementShortName">in_valid</obj_property>
+      <obj_property name="ObjectShortName">in_valid</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/i_packer/in_last">
+      <obj_property name="ElementShortName">in_last</obj_property>
+      <obj_property name="ObjectShortName">in_last</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/top_tb/i_top/i_packer/out_data">
+      <obj_property name="ElementShortName">out_data[63:0]</obj_property>
+      <obj_property name="ObjectShortName">out_data[63:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/i_packer/out_valid">
+      <obj_property name="ElementShortName">out_valid</obj_property>
+      <obj_property name="ObjectShortName">out_valid</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/i_packer/out_last">
+      <obj_property name="ElementShortName">out_last</obj_property>
+      <obj_property name="ObjectShortName">out_last</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/top_tb/i_top/combiner_over_threshold">
+      <obj_property name="ElementShortName">combiner_over_threshold</obj_property>
+      <obj_property name="ObjectShortName">combiner_over_threshold</obj_property>
+   </wvobject>
+</wave_config>

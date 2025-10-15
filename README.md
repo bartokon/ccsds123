@@ -48,7 +48,9 @@ ctest --test-dir build -V
 
 Unit tests cover RGB round-trips, random fixed-seed imagery, local-difference
 cases from the VHDL pipeline, residual mapping invertibility, and the control
-module’s scan order.
+module’s scan order. Additional regression tests verify encoding into external
+bitstream buffers, container summaries, and the behaviour of the predictor,
+weight-update, and dot-product helpers.
 
 To exercise the HDL comparison helper (currently looping back the reference
 image), run:
@@ -59,6 +61,15 @@ cmake --build build -j --target hdl_ref
 
 This target generates an 8×8 gradient BSQ image in the build directory, then feeds
 both the reference and “HDL” paths to `tools/hdl_compare.py`.
+
+## Vivado automation
+
+The `make hdl-project` and `make hdl-sim` targets now regenerate the Verilog and
+VHDL parameter include files automatically before Vivado starts. By default the
+parameters are derived from `tools/conf.json`; set the `HDL_CONFIG` environment
+variable to point at an alternative configuration if required. The helper script
+invokes `python3` unless a different interpreter is provided via the `PYTHON`
+environment variable.
 
 ## Command-line tools
 
