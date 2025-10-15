@@ -1,0 +1,7 @@
+# D  sample  scaled_pred  expected_delta
+4 2 -6 10
+4 -3 5 10
+4 3 -6 11
+4 -4 5 11
+4 -7 -6 7
+4 5 5 5
