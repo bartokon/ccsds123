@@ -56,23 +56,22 @@ architecture rtl of weight_update is
 
   -- Function for initializing weights at t = 0
   function init_weight_vec return weight_vec_t is
-    variable weight_vec : weight_vec_t;
-    variable P          : integer;
+    variable weight_vec       : weight_vec_t := (others => (others => '0'));
+    variable pred_components  : integer;
+    variable base             : integer;
   begin
     if (REDUCED) then
-      P := CZ;
+      pred_components := CZ;
     else
-      P := CZ - 3;
+      pred_components := max(CZ - 3, 0);
     end if;
 
-    weight_vec(0) := to_signed(7 * (2**OMEGA / 8), OMEGA+3);
-    for i in 1 to P-1 loop
-      weight_vec(i) := to_signed(to_integer(weight_vec(i-1) / 8), OMEGA+3);
-    end loop;
-    if (not REDUCED) then
-      weight_vec(CZ-3) := to_signed(0, OMEGA+3);
-      weight_vec(CZ-2) := to_signed(0, OMEGA+3);
-      weight_vec(CZ-1) := to_signed(0, OMEGA+3);
+    if (pred_components > 0) then
+      base := 7 * (2**OMEGA / 8);
+      weight_vec(0) := to_signed(base, OMEGA+3);
+      for i in 1 to pred_components-1 loop
+        weight_vec(i) := to_signed(to_integer(weight_vec(i-1) / 8), OMEGA+3);
+      end loop;
     end if;
     return weight_vec;
   end function init_weight_vec;
