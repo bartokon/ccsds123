@@ -91,7 +91,7 @@ hdl-sim: hdl-params $(HDL_BUILD_DIR) $(HDL_TEST_INPUT) | $(HDL_OUTPUT_DIR)
 compare: cpp-build $(HDL_TEST_INPUT) | $(HDL_CPP_DIR)
 	$(CPP_BUILD_DIR)/src/cpp/ccsds123_encode -i "$(abspath $(HDL_TEST_INPUT))" -o "$(abspath $(HDL_CPP_CONTAINER))" -nx $(HDL_NX) -ny $(HDL_NY) -nz $(HDL_NZ) -d $(HDL_DEPTH)
 	$(MAKE) hdl-sim
-	$(PYTHON) tools/compare_bitstreams.py --container "$(abspath $(HDL_CPP_CONTAINER))" --hdl-payload "$(abspath $(HDL_HDL_PAYLOAD))" --payload-output "$(abspath $(HDL_CPP_PAYLOAD))" --input-bytes $(HDL_INPUT_BYTES)
+	$(PYTHON) tools/compare_bitstreams.py --container "$(abspath $(HDL_CPP_CONTAINER))" --hdl-payload "$(abspath $(HDL_HDL_PAYLOAD))" --payload-output "$(abspath $(HDL_CPP_PAYLOAD))" --input-bytes $(HDL_INPUT_BYTES) --input-file "$(abspath $(HDL_TEST_INPUT))" --decoder "$(abspath $(CPP_BUILD_DIR))/src/cpp/ccsds123_decode"
 
 hdl-clean:
 	rm -rf $(HDL_BUILD_DIR)
