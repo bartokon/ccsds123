@@ -32,7 +32,7 @@ HDL_HDL_PAYLOAD ?= $(HDL_OUTPUT_DIR)/out.bin
 
 VIVADO_ENV := source "$(SETTINGS_SCRIPT)" &&
 
-.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean compare clean
+.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean compare run_compare clean
 
 help:
 	@echo "Available targets:"
@@ -42,6 +42,7 @@ help:
 	@echo "  make hdl-project    - Generate the Vivado project structure."
 	@echo "  make hdl-sim        - Create the Vivado project and run behavioral simulation."
 	@echo "  make compare        - Run HDL simulation and compare payload bits against the C++ reference."
+	@echo "  make run_compare    - Execute C++ tests, HDL simulation, and payload comparison with round-trip checks."
 	@echo "  make clean          - Remove generated build artifacts."
 
 $(CPP_BUILD_DIR):
@@ -92,6 +93,8 @@ compare: cpp-build $(HDL_TEST_INPUT) | $(HDL_CPP_DIR)
 	$(CPP_BUILD_DIR)/src/cpp/ccsds123_encode -i "$(abspath $(HDL_TEST_INPUT))" -o "$(abspath $(HDL_CPP_CONTAINER))" -nx $(HDL_NX) -ny $(HDL_NY) -nz $(HDL_NZ) -d $(HDL_DEPTH)
 	$(MAKE) hdl-sim
 	$(PYTHON) tools/compare_bitstreams.py --container "$(abspath $(HDL_CPP_CONTAINER))" --hdl-payload "$(abspath $(HDL_HDL_PAYLOAD))" --payload-output "$(abspath $(HDL_CPP_PAYLOAD))" --input-bytes $(HDL_INPUT_BYTES) --input-file "$(abspath $(HDL_TEST_INPUT))" --decoder "$(abspath $(CPP_BUILD_DIR))/src/cpp/ccsds123_decode"
+
+run_compare: cpp-test compare
 
 hdl-clean:
 	rm -rf $(HDL_BUILD_DIR)

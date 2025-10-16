@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import struct
 import subprocess
 import sys
@@ -20,6 +21,32 @@ HEADER_FORMATS = {
     3: (HEADER_V3_FORMAT, struct.calcsize(HEADER_V3_FORMAT), 18),
 }
 MAGIC = b"C123"
+
+
+@dataclass(frozen=True)
+class ContainerInfo:
+    """Minimal view of a CCSDS-123 container header and payload."""
+
+    header_values: tuple[int | bytes, ...]
+    header_bytes: bytes
+    payload: bytes
+    payload_bits: int
+
+    @property
+    def version(self) -> int:
+        return int(self.header_values[1])
+
+    @property
+    def dimensions(self) -> tuple[int, int, int, int]:
+        nx = int(self.header_values[2])
+        ny = int(self.header_values[3])
+        nz = int(self.header_values[4])
+        depth = int(self.header_values[5])
+        return nx, ny, nz, depth
+
+    @property
+    def expected_payload_bytes(self) -> int:
+        return (self.payload_bits + 7) // 8
 
 
 def format_slice(data: bytes, base_index: int, width: int = 16) -> str:
@@ -56,15 +83,15 @@ def decode_container(
     return result
 
 
-def compare_raw_streams(original: Path, reconstructed: Path) -> int:
+def compare_raw_streams(label: str, original: Path, reconstructed: Path) -> int:
     original_bytes = original.read_bytes()
     reconstructed_bytes = reconstructed.read_bytes()
     if original_bytes == reconstructed_bytes:
-        print("Round-trip verification: decoded samples match the input stream")
+        print(f"{label}: decoded samples match the input stream")
         return 0
 
     print(
-        "Round-trip verification failed: decoded samples differ from the input stream",
+        f"{label}: decoded samples differ from the input stream",
         file=sys.stderr,
     )
     mismatch_limit = min(MISMATCH_LIMIT, len(reconstructed_bytes), len(original_bytes))
@@ -99,7 +126,7 @@ def compare_raw_streams(original: Path, reconstructed: Path) -> int:
     return 1
 
 
-def parse_container(path: Path) -> tuple[tuple[int, ...], bytes]:
+def parse_container(path: Path) -> ContainerInfo:
     data = path.read_bytes()
     min_header_size = min(size for _, size, _ in HEADER_FORMATS.values())
     if len(data) < min_header_size:
@@ -120,7 +147,8 @@ def parse_container(path: Path) -> tuple[tuple[int, ...], bytes]:
             f"({len(data)} < {header_size})"
         )
 
-    header = struct.unpack(fmt, data[:header_size])
+    header_bytes = data[:header_size]
+    header = struct.unpack(fmt, header_bytes)
     if header[0] != MAGIC:
         raise ValueError(f"Container '{path}' has invalid magic {header[0]!r}")
 
@@ -132,7 +160,15 @@ def parse_container(path: Path) -> tuple[tuple[int, ...], bytes]:
         raise ValueError(
             f"Container '{path}' payload truncated: expected {payload_bytes} bytes, got {len(payload)}"
         )
-    return header, payload
+    return ContainerInfo(header, header_bytes, payload, payload_bits)
+
+
+def bit_at(data: bytes, bit_index: int) -> int:
+    byte_index, bit_offset = divmod(bit_index, 8)
+    if byte_index >= len(data):
+        return 0
+    byte = data[byte_index]
+    return (byte >> (7 - bit_offset)) & 1
 
 
 def compare_payloads(
@@ -143,7 +179,8 @@ def compare_payloads(
     input_file: Path | None,
     decoder: Path | None,
 ) -> int:
-    header, reference_payload = parse_container(container)
+    info = parse_container(container)
+    reference_payload = info.payload
     if payload_output is not None:
         payload_output.parent.mkdir(parents=True, exist_ok=True)
         payload_output.write_bytes(reference_payload)
@@ -154,11 +191,31 @@ def compare_payloads(
     )
     exit_code = 0
 
-    if len(hdl_bytes) != len(reference_payload):
+    expected_payload_bytes = info.expected_payload_bytes
+    if len(reference_payload) != expected_payload_bytes:
         print(
-            f"Length mismatch: HDL payload has {len(hdl_bytes)} bytes, reference has {len(reference_payload)} bytes",
+            "Container payload length does not match header payload bits: "
+            f"expected {expected_payload_bytes} bytes, container stores {len(reference_payload)} bytes",
             file=sys.stderr,
         )
+        exit_code = 1
+
+    if len(hdl_bytes) != expected_payload_bytes:
+        diff = len(hdl_bytes) - expected_payload_bytes
+        relation = "more" if diff > 0 else "fewer"
+        print(
+            f"Length mismatch: HDL payload has {len(hdl_bytes)} bytes, expected {expected_payload_bytes} bytes ({abs(diff)} {relation} byte(s))",
+            file=sys.stderr,
+        )
+        if diff > 0:
+            extra = hdl_bytes[expected_payload_bytes:expected_payload_bytes + DEBUG_BYTES]
+            if extra:
+                print("  Extra HDL bytes (first slice):", file=sys.stderr)
+                print(format_slice(extra, expected_payload_bytes), file=sys.stderr)
+        else:
+            missing_start = max(0, len(hdl_bytes) - DEBUG_BYTES)
+            print("  HDL payload truncated slice:", file=sys.stderr)
+            print(format_slice(hdl_bytes[missing_start:], missing_start), file=sys.stderr)
         exit_code = 1
 
     compare_len = min(len(hdl_bytes), len(reference_payload))
@@ -190,14 +247,66 @@ def compare_payloads(
         print("HDL payload slice:", file=sys.stderr)
         print(format_slice(hdl_bytes[start:end], start), file=sys.stderr)
 
+    bits_available = len(hdl_bytes) * 8
+    bit_mismatches: list[int] = []
+    for bit_index in range(min(info.payload_bits, bits_available)):
+        if bit_at(reference_payload, bit_index) != bit_at(hdl_bytes, bit_index):
+            bit_mismatches.append(bit_index)
+            if len(bit_mismatches) >= MISMATCH_LIMIT:
+                break
+
+    if bit_mismatches:
+        exit_code = 1
+        first_bit = bit_mismatches[0]
+        last_bit = bit_mismatches[-1]
+        print(
+            f"Bit-level mismatch detected. First differing bit {first_bit} (byte {first_bit // 8}), "
+            f"last reported bit {last_bit}.",
+            file=sys.stderr,
+        )
+        for bit_index in bit_mismatches:
+            byte_index, bit_offset = divmod(bit_index, 8)
+            ref_bit = bit_at(reference_payload, bit_index)
+            hdl_bit = bit_at(hdl_bytes, bit_index)
+            print(
+                f"  bit {bit_index:05d} (byte {byte_index:05d}, bit {bit_offset}): HDL={hdl_bit} REF={ref_bit}",
+                file=sys.stderr,
+            )
+
+    if bits_available < info.payload_bits:
+        print(
+            f"HDL payload is missing {info.payload_bits - bits_available} bit(s) relative to the container header",
+            file=sys.stderr,
+        )
+        exit_code = 1
+    elif bits_available > info.payload_bits:
+        extra_bits = bits_available - info.payload_bits
+        trailing_start = info.payload_bits // 8
+        trailing_slice = hdl_bytes[trailing_start:trailing_start + DEBUG_BYTES]
+        non_zero_extra = any(
+            bit_at(hdl_bytes, info.payload_bits + bit) == 1 for bit in range(extra_bits)
+        )
+        descriptor = "non-zero" if non_zero_extra else "all-zero"
+        print(
+            f"HDL payload provides {extra_bits} extra padding bit(s) beyond the {info.payload_bits} encoded bits ({descriptor}).",
+            file=sys.stderr,
+        )
+        if trailing_slice:
+            print("  HDL trailing slice:", file=sys.stderr)
+            print(format_slice(trailing_slice, trailing_start), file=sys.stderr)
+        if non_zero_extra:
+            exit_code = 1
+
     if len(reference_payload) > 0:
         ratio = input_bytes / len(reference_payload)
         print(f"Compression ratio (input/output): {ratio:.6f}")
     else:
         print("Compression ratio unavailable: reference payload is empty")
 
-    version, nx, ny, nz, depth = header[1], header[2], header[3], header[4], header[5]
-    print(f"C++ container summary: version={version}, NX={nx}, NY={ny}, NZ={nz}, D={depth}")
+    nx, ny, nz, depth = info.dimensions
+    print(
+        f"C++ container summary: version={info.version}, NX={nx}, NY={ny}, NZ={nz}, D={depth}"
+    )
     if exit_code == 0:
         print("HDL payload matches C++ reference payload")
 
@@ -221,14 +330,20 @@ def compare_payloads(
             )
         else:
             with TemporaryDirectory() as tmp_dir:
-                decoded_path = Path(tmp_dir) / "decoded.bsq"
+                decoded_path = Path(tmp_dir) / "decoded_cpp.bsq"
+                hdl_container_path = Path(tmp_dir) / "hdl_payload.c123"
+                hdl_container_path.write_bytes(info.header_bytes + hdl_bytes)
+                hdl_decoded_path = Path(tmp_dir) / "decoded_hdl.bsq"
                 try:
                     decode_container(decoder, container, decoded_path)
+                    decode_container(decoder, hdl_container_path, hdl_decoded_path)
                 except Exception as exc:  # pragma: no cover - external tool invocation
                     print(f"Decoder invocation failed: {exc}", file=sys.stderr)
                     roundtrip_status = 1
                 else:
-                    roundtrip_status = compare_raw_streams(input_file, decoded_path)
+                    cpp_status = compare_raw_streams("C++ round-trip", input_file, decoded_path)
+                    hdl_status = compare_raw_streams("HDL round-trip", input_file, hdl_decoded_path)
+                    roundtrip_status = cpp_status or hdl_status
 
     return 1 if exit_code or roundtrip_status else 0
 

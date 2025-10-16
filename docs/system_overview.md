@@ -1,74 +1,39 @@
-# CCSDS 123 Implementation Overview
+# System Overview
 
-This document captures how the repository ties the C++ software reference, RTL encoder, and AI Engine (AIE) model together. It also documents the generated artefacts, data paths, and build coordination so regressions such as payload mismatches can be diagnosed quickly.
+This document describes the architecture and implementation strategy for the multi-platform CCSDS 123.0-B-2 lossless image compression codec.
 
-## Repository layout
+## High-level architecture
 
-The project keeps each implementation in a dedicated subtree and shares common helpers under `tools/`.
+The project provides three parallel implementations targeting distinct execution environments:
 
-```mermaid
-flowchart LR
-    A[ccsds123/] --> B[src/]
-    A --> C[docs/]
-    A --> D[tools/]
-    B --> B1[cpp]
-    B --> B2[hdl]
-    B --> B3[aie]
-    B --> B4[python_reference]
-    D --> D1[gen_impl_params.py]
-    D --> D2[compare_bitstreams.py]
-```
+1. **C++ reference codec** — A portable library with command-line tools for encoding and decoding.
+2. **VHDL compressor** — A streaming hardware pipeline intended for FPGA synthesis.
+3. **AI Engine kernels** — Experimental accelerators wrapping the C++ codec for AMD-Xilinx AIE tiles.
 
-* `src/cpp` – C++ encoder/decoder library, CLI utilities, and unit tests.
-* `src/hdl` – synthesizable VHDL/Verilog for the hardware encoder and test bench scaffolding.
-* `src/aie` – thin AIE graph that wraps the C++ codec for accelerator experiments.
-* `tools` – scripts for parameter generation, stimulus preparation, and HDL vs. C++ payload comparison.
+Each implementation shares a common algorithmic core defined by the CCSDS 123.0-B-2 standard, maintaining identical compression behaviour when configured with matching parameters.
 
-## C++ implementation
+## C++ codec structure
 
-The library in `src/cpp` provides both a container format and the sample-adaptive coding pipeline used by the other implementations.
+The C++ implementation resides in `src/cpp/` and consists of:
 
-```mermaid
-flowchart TD
-    I[Input samples] -->|Params validated| V[Validator]
-    V --> L[Local diff & predictor modules]
-    L --> M[Residual mapper]
-    M --> G[Sample-adaptive Golomb encoder]
-    G --> P[Payload bitstream]
-    P --> H[Container header writer]
-    H --> O[.c123 container]
-```
+* `Ccsds123Codec.cpp` implements both the encoder and decoder with a container-based bitstream format. The encoder exposes two write modes: in-memory accumulation and streaming to external buffers. The decoder infers predictor settings from the container header to ensure every encoded payload can be reconstructed without manual configuration. 【F:src/cpp/src/Ccsds123Codec.cpp†L1-L730】
+* `Ccsds123Params.h` defines the parameter structures controlling band ordering, local-sum configuration, weight initialisation, and sample-adaptive Golomb coding. 【F:src/cpp/include/Ccsds123Params.h†L1-L95】
+* CLI tools (`ccsds123_encode`, `ccsds123_decode`) accept raw BSQ imagery and emit or consume containerised bitstreams with embedded metadata. 【F:src/cpp/src/main_encode.cpp†L1-L162】【F:src/cpp/src/main_decode.cpp†L1-L110】
 
-Key aspects:
+The compressor operates in three stages:
 
-* `Ccsds123Codec.cpp` defines two header layouts:
-  * **Version 2** (`HeaderLayoutV2`) keeps only the legacy subset of CCSDS parameters and relies on defaults for weight-update tuning.
-  * **Version 3** (`HeaderLayoutV3`) stores every predictor, mapper, and Golomb control field so the container round-trips to both HDL and AIE front-ends without extra configuration. 【F:src/cpp/src/Ccsds123Codec.cpp†L18-L43】【F:src/cpp/src/Ccsds123Codec.cpp†L512-L563】
-* The CLI encoder (`ccsds123_encode_main.cpp`) fills a `Params` structure, runs `encode`, and writes the combined header+payload container that the comparison tooling consumes. 【F:src/cpp/src/ccsds123_encode_main.cpp†L20-L118】【F:src/cpp/src/ccsds123_encode_main.cpp†L184-L236】
-* `tools/compare_bitstreams.py` unpacks either header version automatically, extracts the payload, and compares it to the HDL dump while reporting compression ratios. 【F:tools/compare_bitstreams.py†L11-L78】
+1. **Local-difference calculation** computes directional gradients using the configured neighbour pattern.
+2. **Prediction** combines scaled gradients with adaptive weights that update after each sample.
+3. **Sample-adaptive Golomb coding** maps prediction residuals to variable-length codes based on the running accumulator.
 
-## HDL implementation
+## HDL compressor pipeline
 
-The VHDL encoder mirrors the software pipeline with explicit staging, shared stores, and a byte packer that emits AXI-stream friendly output.
+The HDL implementation mirrors the C++ encoder with a pipelined dataflow architecture:
 
-```mermaid
-flowchart LR
-    IN[AXIS samples] --> CTRL[control.vhd]
-    CTRL --> STO[sample_store.vhd]
-    STO --> LD[local_diff.vhd]
-    LD --> DOT[dot_pipetree.vhd]
-    DOT --> PRED[predictor.vhd]
-    PRED --> WU[weight_update.vhd]
-    WU --> RES[residual_mapper.vhd]
-    RES --> SA[sa_coder.vhd]
-    SA --> PACK[packer.vhd]
-    PACK --> OUT[AXIS payload]
-```
-
-Highlights:
-
-* `control.vhd` reproduces the CCSDS state machine: it tracks `(x, y, z)` positions, emits first/last markers, and computes the dynamic scaling exponent `p(t)` exactly as the C++ `ControlState`. 【F:src/hdl/src/control.vhd†L1-L115】
-* `weight_update.vhd` now initialises the adaptive weights identically to the software model. Reduced-mode builds seed every component, while the full predictor keeps the three directional taps at zero until the first update. This prevents the large non-zero bias that previously inflated the HDL payload. 【F:src/hdl/src/weight_update.vhd†L56-L109】
+* `compressor.vhd` instantiates the control, local-difference, predictor, and coder modules inside a top-level wrapper that consumes BIP samples and emits packed bitstream bytes. 【F:src/hdl/src/compressor.vhd†L1-L234】
+* `control.vhd` generates band, line, and column indices matching the BSQ-to-BIP transformation assumed by the test bench. 【F:src/hdl/src/control.vhd†L1-L152】
+* `local_diff.vhd` implements the local-sum calculator with configurable neighbour selection. 【F:src/hdl/src/local_diff.vhd†L1-L203】
+* `predictor.vhd` contains the weight-update and scaled-sum stages, maintaining per-band weight vectors in distributed RAM. 【F:src/hdl/src/predictor.vhd†L1-L287】
 * `sa_coder.vhd` implements the sample-adaptive Golomb coder with a five-stage pipeline, matching the bit allocation logic in `SampleAdaptiveGolombEncoder`. 【F:src/hdl/src/sa_coder.vhd†L1-L188】
 * `packer.vhd` collects variable-length code words from each pipeline lane, enforces the configured endianness, and emits `tlast` once the final byte has been flushed. 【F:src/hdl/src/packer.vhd†L1-L618】
 
@@ -94,8 +59,8 @@ flowchart TD
 ## Build and regression flow
 
 1. `tools/gen_impl_params.py` reads `tools/conf.json` and emits both VHDL and Verilog parameter files so every implementation shares the same image dimensions and coder settings. 【F:tools/gen_impl_params.py†L1-L33】
-2. `make compare` compiles the C++ reference, generates the gradient test cube, launches the Vivado simulation, and finishes by invoking `tools/compare_bitstreams.py` to check that the HDL payload matches the software payload byte-for-byte. 【F:Makefile†L63-L101】
-3. The comparison script can also export the C++ payload (`--payload-output`) so deeper debugging can be done without rerunning the encoder. 【F:tools/compare_bitstreams.py†L52-L71】
+2. `make run_compare` executes the C++ unit tests, compiles the reference codec, generates the gradient test cube, launches the Vivado simulation, and finishes by invoking `tools/compare_bitstreams.py` to validate the HDL payload against the software payload at both the byte and bit level while decoding each stream for a lossless round-trip. 【F:Makefile†L63-L109】
+3. The comparison script can export the C++ payload (`--payload-output`) and now emits detailed mismatch diagnostics to speed up debug loops. 【F:tools/compare_bitstreams.py†L1-L348】
 
 ## Notes on header versions
 

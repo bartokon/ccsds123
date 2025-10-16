@@ -9,3 +9,4 @@ tools/__pycache__/
 src/hdl/tb/impl_params.v
 src/hdl/tb/synth_params.vhd
 tests/data/frame_*.bsq
+data
