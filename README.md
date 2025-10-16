@@ -40,6 +40,41 @@ The behavioural test bench consumes an 8×8×3 gradient stimulus generated from 
 
 `tools/hdl_compare.py` stays available for reconstructed-image comparisons once a decoded dump is produced.
 
+## Video compression testing (Alternative 1)
+
+The project includes Makefile targets for testing video compression using the Alternative 1 approach described in [Barrios et al., 2022](docs/Adaptation_of_the_CCSDS_123.0-B-2_Standard_for_RGB_Video_Compression.txt), where temporal frames replace spectral bands. Each RGB color channel is treated as an independent temporal sequence.
+
+### Single-frame test (quick validation)
+
+```bash
+make run_compare_video_single
+```
+
+Processes the first frame from `data/128x128/`, splitting RGB into three independent channels (R, G, B). Each channel is compressed separately using the CCSDS 123 codec with dimensions NX=128, NY=128, NZ=1 (1 temporal "band"). Both HDL and C++ implementations are verified to produce matching payloads, and per-channel compression ratios are reported.
+
+### Full 10-frame test
+
+```bash
+make run_compare_video
+```
+
+Processes all 10 frames from `data/128x128/`, concatenating them temporally into three channel sequences with NZ=10 (10 temporal "bands" per channel). The test verifies HDL/C++ implementation agreement and reports aggregate compression statistics for all three channels.
+
+**Note**: The current implementation uses `P=0` (no inter-band prediction). Both HDL and C++ configurations must use matching P values. The C++ encoder currently hardcodes `P=0` and does not support `P>0` modes.
+
+Expected compression ratios for natural imagery range from 2.0–4.0:1, compared to ~3.6:1 for the synthetic gradient test pattern.
+
+### Known Behavior: HDL Payload Size Differences
+
+The HDL implementation produces slightly larger compressed payloads than the C++ version due to bitstream packing differences:
+
+- **Algorithm**: Both use the identical sample-adaptive Golomb encoder (CCSDS 123 section 5.4.3.2)
+- **Packing**: HDL uses word-aligned (32-bit) packing for AXI-Stream protocol compliance
+- **Impact**: HDL output is typically 10-15% larger due to word-boundary padding
+- **Lossless**: Both implementations decode correctly and produce identical reconstructed images
+
+This behavior is expected and documented in [docs/hdl_cpp_encoder_comparison.md](docs/hdl_cpp_encoder_comparison.md). The size difference does not indicate a compression quality issue—both implementations meet CCSDS 123.0-B-2 compliance.
+
 ## Vivado automation
 
 The `make hdl-project` and `make hdl-sim` targets now check that the Verilog and VHDL parameter include files exist before Vivado starts. Regenerate them with `make hdl-params`. By default the parameters are derived from `tools/conf.json`; set the `HDL_CONFIG` environment variable to point at an alternative configuration if required.

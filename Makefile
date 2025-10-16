@@ -32,18 +32,26 @@ HDL_HDL_PAYLOAD ?= $(HDL_OUTPUT_DIR)/out.bin
 
 VIVADO_ENV := source "$(SETTINGS_SCRIPT)" &&
 
-.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean compare run_compare clean
+VIDEO_PNG_DIR ?= data/128x128
+VIDEO_SINGLE_DIR ?= build/vectors/video_single
+VIDEO_FULL_DIR ?= build/vectors/video_full
+VIDEO_NX ?= 128
+VIDEO_NY ?= 128
+
+.PHONY: help cpp cpp-configure cpp-build cpp-test cpp-clean hdl-params hdl-project hdl-sim hdl-clean compare run_compare video-convert-single video-convert-full run_compare_video_single run_compare_video clean
 
 help:
 	@echo "Available targets:"
-	@echo "  make cpp            - Configure, build, and test the C++ sources."
-	@echo "  make cpp-build      - Build the C++ executables without running tests."
-	@echo "  make cpp-test       - Run the C++ unit tests (builds first)."
-	@echo "  make hdl-project    - Generate the Vivado project structure."
-	@echo "  make hdl-sim        - Create the Vivado project and run behavioral simulation."
-	@echo "  make compare        - Run HDL simulation and compare payload bits against the C++ reference."
-	@echo "  make run_compare    - Execute C++ tests, HDL simulation, and payload comparison with round-trip checks."
-	@echo "  make clean          - Remove generated build artifacts."
+	@echo "  make cpp                      - Configure, build, and test the C++ sources."
+	@echo "  make cpp-build                - Build the C++ executables without running tests."
+	@echo "  make cpp-test                 - Run the C++ unit tests (builds first)."
+	@echo "  make hdl-project              - Generate the Vivado project structure."
+	@echo "  make hdl-sim                  - Create the Vivado project and run behavioral simulation."
+	@echo "  make compare                  - Run HDL simulation and compare payload bits against the C++ reference."
+	@echo "  make run_compare              - Execute C++ tests, HDL simulation, and payload comparison with round-trip checks."
+	@echo "  make run_compare_video_single - Test video compression with 1 frame (Alternative 1: RGB channels independent)."
+	@echo "  make run_compare_video        - Test video compression with 10 frames (Alternative 1: RGB channels independent)."
+	@echo "  make clean                    - Remove generated build artifacts."
 
 $(CPP_BUILD_DIR):
 	@mkdir -p $@
@@ -103,5 +111,59 @@ logs-clean:
 	rm -rf vivado*.jou
 	rm -rf vivado*.log
 	rm -rf xvlog.pb
+
+$(VIDEO_SINGLE_DIR):
+	@mkdir -p $@/cpp $@/hdl
+
+$(VIDEO_FULL_DIR):
+	@mkdir -p $@/cpp $@/hdl
+
+video-convert-single: cpp-build | $(VIDEO_SINGLE_DIR)
+	$(PYTHON) tools/convert_video_to_channels.py \
+	  --input $(VIDEO_PNG_DIR) \
+	  --output $(VIDEO_SINGLE_DIR) \
+	  --num-frames 1 \
+	  --nx $(VIDEO_NX) \
+	  --ny $(VIDEO_NY)
+
+video-convert-full: cpp-build | $(VIDEO_FULL_DIR)
+	$(PYTHON) tools/convert_video_to_channels.py \
+	  --input $(VIDEO_PNG_DIR) \
+	  --output $(VIDEO_FULL_DIR) \
+	  --num-frames 10 \
+	  --nx $(VIDEO_NX) \
+	  --ny $(VIDEO_NY)
+
+run_compare_video_single: video-convert-single
+	$(PYTHON) tools/compare_video_alt1.py \
+	  --bsq-dir $(VIDEO_SINGLE_DIR) \
+	  --output-dir $(VIDEO_SINGLE_DIR) \
+	  --encoder $(CPP_BUILD_DIR)/src/cpp/ccsds123_encode \
+	  --decoder $(CPP_BUILD_DIR)/src/cpp/ccsds123_decode \
+	  --hdl-config tools/conf_video_single.json \
+	  --nx $(VIDEO_NX) \
+	  --ny $(VIDEO_NY) \
+	  --nz 1 \
+	  --depth 16 \
+	  --vivado-script $(HDL_SCRIPT) \
+	  --hdl-build-dir $(HDL_BUILD_DIR) \
+	  --settings-script '$(SETTINGS_SCRIPT)' \
+	  --vivado '$(VIVADO)'
+
+run_compare_video: video-convert-full
+	$(PYTHON) tools/compare_video_alt1.py \
+	  --bsq-dir $(VIDEO_FULL_DIR) \
+	  --output-dir $(VIDEO_FULL_DIR) \
+	  --encoder $(CPP_BUILD_DIR)/src/cpp/ccsds123_encode \
+	  --decoder $(CPP_BUILD_DIR)/src/cpp/ccsds123_decode \
+	  --hdl-config tools/conf_video_full.json \
+	  --nx $(VIDEO_NX) \
+	  --ny $(VIDEO_NY) \
+	  --nz 10 \
+	  --depth 16 \
+	  --vivado-script $(HDL_SCRIPT) \
+	  --hdl-build-dir $(HDL_BUILD_DIR) \
+	  --settings-script '$(SETTINGS_SCRIPT)' \
+	  --vivado '$(VIVADO)'
 
 clean: logs-clean cpp-clean hdl-clean
